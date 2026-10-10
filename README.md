@@ -11,10 +11,9 @@ cd ~/work/backend
 atlas init             # org + cloud Project, writes .atlas/
 atlas memory enable
 atlas capture enable
-atlas shell            # subshell: capture proxy + memory server running
-  claude               # the normal agent command; captured, memory-aware
+atlas run codex        # the product: any registry agent over ACP, chat TUI,
+atlas run claude-code  #   full capture, cloud sync, shared memory over the wire
 atlas status
-atlas run codex        # optional: drive an ACP agent headlessly
 ```
 
 ## Where things are
@@ -22,10 +21,10 @@ atlas run codex        # optional: drive an ACP agent headlessly
 | path | what |
 |---|---|
 | `docs/atlas-reference/README.md` | index of the hand-off folder copied from the desktop repo: read first |
-| `docs/atlas-reference/SPEC.md` | the specification; §1.2 holds the locked decisions D1–D19 |
+| `docs/atlas-reference/SPEC.md` | the specification; §1.2 holds the locked decisions D1–D20 |
 | `docs/atlas-reference/evidence-*.md` | desktop-side facts with `file:line` citations into the desktop repo |
 | `docs/atlas-reference/adr/` | the desktop ADRs this project leans on |
-| `docs/adr/` | this repo's own ADRs; `0000` records D7, `0001`–`0007` record D13–D19 |
+| `docs/adr/` | this repo's own ADRs; `0000` records D7, `0001`–`0007` record D13–D19, `0009` records D20 (ACP only, the app's way); `0000`, `0003`, `0004` are superseded |
 
 Ground rules that are not negotiable: never read another agent's transcript
 files, never inject memory into prompts, never log an `Authorization` header,

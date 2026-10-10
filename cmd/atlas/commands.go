@@ -118,7 +118,9 @@ func newCaptureCmd() *cobra.Command {
 	return group("capture", "Session capture for agents run in this folder",
 		withRun(leaf("enable", "Turn capture on and install hooks and the status line", cobra.NoArgs), runCaptureGate(true)),
 		withRun(leaf("disable", "Turn capture off and remove hooks and the status line", cobra.NoArgs), runCaptureGate(false)),
-		leaf("retry", "Re-queue sessions that failed to sync", cobra.NoArgs),
+		withRun(leaf("sync", "Upload captured sessions to the cloud Project now", cobra.NoArgs), runCaptureSync(false)),
+		withRun(leaf("retry", "Re-queue sessions that failed to sync, then sync", cobra.NoArgs), runCaptureSync(true)),
+		withRun(leaf("link", "Link captured sessions to the commits that carried their work", cobra.NoArgs), runCaptureLink),
 	)
 }
 

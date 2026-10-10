@@ -25,7 +25,9 @@ func TestMain(m *testing.M) {
 var wantCommands = []string{
 	"capture disable",
 	"capture enable",
+	"capture link",
 	"capture retry",
+	"capture sync",
 	"env",
 	"hook claude session-end",
 	"hook claude session-start",
@@ -75,7 +77,7 @@ var implemented = map[string]bool{
 	"init": true, "status": true, "memory enable": true, "memory disable": true,
 	"capture enable": true, "capture disable": true,
 	"memory verify": true, "memory export": true, "memory import": true, "mcp-bridge": true, "serve": true,
-	"shell": true, "env": true, "statusline claude": true, "hook claude session-start": true,
+	"shell": true, "env": true, "capture link": true, "capture sync": true, "capture retry": true, "statusline claude": true, "hook claude session-start": true,
 	"hook claude user-prompt-submit": true, "hook claude stop": true, "hook claude session-end": true,
 }
 

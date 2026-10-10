@@ -16,6 +16,7 @@ const (
 	HeaderAgent   = "X-Atlas-Agent"
 	HeaderCwd     = "X-Atlas-Cwd"
 	HeaderSession = "X-Atlas-Session"
+	HeaderPIDs    = "X-Atlas-PIDs" // the bridge's ancestor pids, nearest first
 )
 
 // Authenticator turns a request into a grant; ok false answers 401.
@@ -27,6 +28,9 @@ type Authenticator func(r *http.Request) (Grant, bool)
 type HTTPHandler struct {
 	Server *Server
 	Auth   Authenticator
+	// Join, when set, may give a session a better identity: the agent's own
+	// session id once its hooks have been matched to the bridge (ADR-0003).
+	Join func(g Grant, r *http.Request) (Grant, bool)
 
 	mu       sync.Mutex
 	sessions map[string]*mcpSession
@@ -35,6 +39,7 @@ type HTTPHandler struct {
 type mcpSession struct {
 	grant    Grant
 	protocol string
+	joined   bool
 }
 
 // NewHTTPHandler wires a server to an authenticator.
@@ -83,8 +88,15 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sid := r.Header.Get("Mcp-Session-Id")
 	if probe.Method == "initialize" {
 		sid = newID()
+		s := &mcpSession{grant: grant}
+		if h.Join != nil {
+			if g, ok := h.Join(grant, r); ok {
+				s.grant, s.joined = g, true
+			}
+		}
+		grant = s.grant
 		h.mu.Lock()
-		h.sessions[sid] = &mcpSession{grant: grant}
+		h.sessions[sid] = s
 		h.mu.Unlock()
 	} else {
 		h.mu.Lock()
@@ -94,6 +106,14 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// Not JSON-RPC on purpose: the bridge replays initialize on this.
 			http.Error(w, "unknown MCP session", http.StatusNotFound)
 			return
+		}
+		if !s.joined && h.Join != nil {
+			if g, ok := h.Join(s.grant, r); ok {
+				h.Server.Rename(r.Context(), s.grant, g)
+				h.mu.Lock()
+				s.grant, s.joined = g, true
+				h.mu.Unlock()
+			}
 		}
 		grant = s.grant
 	}

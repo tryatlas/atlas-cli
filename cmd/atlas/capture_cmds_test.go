@@ -15,7 +15,7 @@ func TestEnableWritesClaudeConfigAndDisableRemovesIt(t *testing.T) {
 		t.Fatal(e)
 	}
 	code, out, e := runCmd(t, "memory", "enable")
-	if code != 0 || !strings.Contains(out, `Claude Code: MCP server "atlas" in .mcp.json`) {
+	if code != 0 || !strings.Contains(out, `claude-code: MCP server "atlas" installed`) {
 		t.Fatalf("%d %s %s", code, out, e)
 	}
 	mcp, _ := os.ReadFile(filepath.Join(root, ".mcp.json"))
@@ -94,5 +94,27 @@ func TestEnvNeedsARunningListener(t *testing.T) {
 	code, _, e := runCmd(t, "env")
 	if code != 1 || !strings.Contains(e, "start one with atlas shell") {
 		t.Fatalf("%d %s", code, e)
+	}
+}
+
+func TestCaptureSyncOnALocalProject(t *testing.T) {
+	gitRepo(t)
+	_, _, _ = runCmd(t, "init", "--local")
+	code, out, e := runCmd(t, "capture", "sync")
+	if code != 0 || !strings.Contains(out, "This Project is local") {
+		t.Fatalf("%d %s %s", code, out, e)
+	}
+	code, out, e = runCmd(t, "capture", "retry")
+	if code != 0 || !strings.Contains(out, "Requeued 0 failed row(s).") {
+		t.Fatalf("%d %s %s", code, out, e)
+	}
+}
+
+func TestServeStopWithoutAListener(t *testing.T) {
+	gitRepo(t)
+	_, _, _ = runCmd(t, "init", "--local")
+	code, out, _ := runCmd(t, "serve", "--stop")
+	if code != 0 || !strings.Contains(out, "No listener is running") {
+		t.Fatalf("%d %s", code, out)
 	}
 }

@@ -219,12 +219,16 @@ func NewTCPForwarder(rawURL, token string) (*HTTPForwarder, error) {
 		Client: &http.Client{Transport: &http.Transport{Proxy: nil}}}, nil
 }
 
-// NewSocketForwarder targets the listener's Unix socket with the grant headers.
-func NewSocketForwarder(socket string, g Grant) *HTTPForwarder {
+// NewSocketForwarder targets the listener's Unix socket with the grant
+// headers and the bridge's ancestor pids (to join it to the agent's session).
+func NewSocketForwarder(socket string, g Grant, pids string) *HTTPForwarder {
 	h := http.Header{}
 	h.Set(HeaderAgent, g.Agent)
 	h.Set(HeaderCwd, g.Cwd)
 	h.Set(HeaderSession, g.SessionID)
+	if pids != "" {
+		h.Set(HeaderPIDs, pids)
+	}
 	tr := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		var d net.Dialer
 		return d.DialContext(ctx, "unix", socket)

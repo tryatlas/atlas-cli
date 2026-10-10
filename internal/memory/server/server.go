@@ -117,6 +117,22 @@ func (s *Server) SessionStarted(ctx context.Context, g Grant) {
 	}
 }
 
+// Rename moves a session's clock to its joined identity and records the
+// joined session's start.
+func (s *Server) Rename(ctx context.Context, from, to Grant) {
+	s.mu.Lock()
+	if c, ok := s.clocks[from.SessionID]; ok {
+		s.clocks[to.SessionID] = c
+		delete(s.clocks, from.SessionID)
+	}
+	if s.read[from.SessionID] {
+		s.read[to.SessionID] = true
+		delete(s.read, from.SessionID)
+	}
+	s.mu.Unlock()
+	s.SessionStarted(ctx, to)
+}
+
 // SessionEnded records session_end and drops the session's clock.
 func (s *Server) SessionEnded(ctx context.Context, g Grant) {
 	s.mu.Lock()

@@ -18,6 +18,7 @@ import (
 
 	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/memory/server"
+	"github.com/tryatlas/atlas-cli/internal/procs"
 	"github.com/tryatlas/atlas-cli/internal/proxy"
 	"github.com/tryatlas/atlas-cli/internal/timefmt"
 )
@@ -28,6 +29,7 @@ type RunFile struct {
 	Port      int    `json:"port"`
 	StartedAt string `json:"startedAt"`
 	Socket    string `json:"socket"`
+	Daemon    bool   `json:"daemon,omitempty"` // started by atlas serve --daemon
 }
 
 // RunFilePath is where a Project's run file lives.
@@ -64,6 +66,25 @@ type Listener struct {
 type Options struct {
 	Recorder          *record.Recorder // nil: no capture proxy
 	AnthropicUpstream *url.URL         // where Claude traffic goes after the proxy
+	Sync              Syncer           // nil: this listener does not drain
+	Daemon            bool             // recorded in the run file for atlas serve --stop
+}
+
+// Syncer is the background drain, driven from POST /sync by atlas capture
+// sync and atlas capture retry while the listener holds the store.
+type Syncer interface {
+	Force()
+	RetryFailed(ctx context.Context) (int64, error)
+}
+
+// SyncRequest is the body of POST /sync.
+type SyncRequest struct {
+	Retry bool `json:"retry"`
+}
+
+// SyncAnswer is its answer.
+type SyncAnswer struct {
+	Requeued int64 `json:"requeued"`
 }
 
 // Start binds the socket (memory, hooks) and, with a recorder, the loopback
@@ -77,8 +98,11 @@ func Start(root, version string, opt Options) (*Listener, error) {
 	mem := server.New(version)
 	ln := &Listener{Root: root, Socket: sock, Memory: mem, Hooks: proxy.NewHooks(), done: make(chan struct{})}
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", server.NewHTTPHandler(mem, server.SocketAuth))
+	mcp := server.NewHTTPHandler(mem, server.SocketAuth)
+	mcp.Join = ln.join
+	mux.Handle("/mcp", mcp)
 	mux.HandleFunc("/hook", ln.hook)
+	mux.HandleFunc("/sync", ln.syncHandler(opt.Sync))
 	ln.http = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		_ = ln.http.Serve(l)
@@ -97,7 +121,7 @@ func Start(root, version string, opt Options) (*Listener, error) {
 		ln.tcp = &http.Server{Handler: pm, ReadHeaderTimeout: 30 * time.Second}
 		go func() { _ = ln.tcp.Serve(tl) }()
 	}
-	rf := RunFile{PID: os.Getpid(), Port: ln.Port, StartedAt: timefmt.RFC3339(time.Now()), Socket: sock}
+	rf := RunFile{PID: os.Getpid(), Port: ln.Port, StartedAt: timefmt.RFC3339(time.Now()), Socket: sock, Daemon: opt.Daemon}
 	b, _ := json.Marshal(rf)
 	if err := os.MkdirAll(filepath.Join(root, ".atlas"), 0o755); err != nil {
 		_ = ln.Stop()
@@ -137,6 +161,7 @@ type HookEvent struct {
 	SessionID string `json:"session_id"`
 	Cwd       string `json:"cwd"`
 	Prompt    string `json:"prompt,omitempty"`
+	PIDs      []int  `json:"pids,omitempty"` // the hook process's ancestors
 }
 
 func (l *Listener) hook(w http.ResponseWriter, r *http.Request) {
@@ -151,8 +176,9 @@ func (l *Listener) hook(w http.ResponseWriter, r *http.Request) {
 	}
 	switch ev.Event {
 	case "session-start":
-		l.Hooks.SessionStart(ev.SessionID, ev.Cwd)
+		l.Hooks.SessionStart(ev.SessionID, ev.Cwd, ev.PIDs)
 	case "user-prompt-submit":
+		l.Hooks.Seen(ev.SessionID, ev.Cwd, ev.PIDs)
 		l.Hooks.Prompt(ev.SessionID, ev.Cwd, ev.Prompt)
 	case "stop":
 		if l.claude != nil {
@@ -165,4 +191,58 @@ func (l *Listener) hook(w http.ResponseWriter, r *http.Request) {
 		l.Hooks.End(ev.SessionID)
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (l *Listener) syncHandler(s Syncer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if s == nil {
+			http.Error(w, "this listener does not sync", http.StatusConflict)
+			return
+		}
+		var req SyncRequest
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&req)
+		var ans SyncAnswer
+		if req.Retry {
+			n, err := s.RetryFailed(r.Context())
+			if err != nil {
+				http.Error(w, "retry failed", http.StatusInternalServerError)
+				return
+			}
+			ans.Requeued = n
+		}
+		s.Force()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ans)
+	}
+}
+
+// join gives a bridge's MCP session the agent's own session id, matched
+// through the hooks by process ancestry (ADR-0003).
+func (l *Listener) join(g server.Grant, r *http.Request) (server.Grant, bool) {
+	bridge := procs.Parse(r.Header.Get(server.HeaderPIDs))
+	id, ok := l.Hooks.Match(bridge, g.Cwd, time.Now(), l.excluded)
+	if !ok || id == g.SessionID {
+		return g, false
+	}
+	g.SessionID = id
+	return g, true
+}
+
+// excluded reports processes that are ancestors of many agents: this
+// listener, its ancestors, and the shell it started.
+func (l *Listener) excluded(pid int) bool {
+	self := os.Getpid()
+	if pid == self || procs.Parent(pid) == self {
+		return true
+	}
+	for _, a := range procs.Ancestors(self, 8) {
+		if a == pid {
+			return true
+		}
+	}
+	return false
 }

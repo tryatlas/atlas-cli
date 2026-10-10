@@ -1,6 +1,6 @@
 # ADR-0000: Ambient integration is per-agent adapters behind one interface
 
-**Status:** Accepted (2026-10-10). Records locked decision D7 (SPEC §1.2).
+**Status:** Accepted (2026-10-10). Records locked decision D7 (SPEC §1.2). **Superseded 2026-10-11 by ADR-0009 (ACP only): the proxy/ambient path is parked and not shipped.**
 
 Numbering: ADRs in this repo are numbered on their own. Desktop ADRs are cited
 as "desktop ADR-00NN" and live in `docs/atlas-reference/adr/`. ADR-0001 to

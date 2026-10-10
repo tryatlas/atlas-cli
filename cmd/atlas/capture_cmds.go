@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -21,9 +23,10 @@ import (
 
 	"github.com/tryatlas/atlas-cli/internal/agents/ambient"
 	"github.com/tryatlas/atlas-cli/internal/auth"
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
+	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 	"github.com/tryatlas/atlas-cli/internal/listener"
+	"github.com/tryatlas/atlas-cli/internal/procs"
 	"github.com/tryatlas/atlas-cli/internal/project"
 )
 
@@ -43,12 +46,20 @@ func anthropicUpstream() (*url.URL, error) {
 	return u, nil
 }
 
-// shellEnv is the environment for agents run in the shell.
-func shellEnv(port int) []string {
+// shellEnv is the environment for agents run in the shell: each adapter's
+// variables, the listener port, and loopback kept off any proxy. shimDir,
+// when set, is prepended to PATH (ADR-0004).
+func shellEnv(port int, adapters []ambient.Adapter, shimDir string) []string {
 	set := map[string]string{
-		"ANTHROPIC_BASE_URL": fmt.Sprintf("http://127.0.0.1:%d/proxy/anthropic", port),
-		"ATLAS_PROXY_PORT":   fmt.Sprint(port),
-		"ATLAS_SHELL":        "1",
+		"ATLAS_PROXY_PORT": fmt.Sprint(port),
+		"ATLAS_SHELL":      "1",
+	}
+	for _, a := range adapters {
+		if s, err := a.Shell(ambient.Listener{Port: port}); err == nil {
+			for k, v := range s.Env {
+				set[k] = v
+			}
+		}
 	}
 	noProxy := os.Getenv("NO_PROXY")
 	if noProxy == "" {
@@ -58,6 +69,9 @@ func shellEnv(port int) []string {
 		noProxy = strings.Trim(noProxy+",127.0.0.1,localhost", ",")
 	}
 	set["NO_PROXY"], set["no_proxy"] = noProxy, noProxy
+	if shimDir != "" {
+		set["PATH"] = shimDir + string(os.PathListSeparator) + os.Getenv("PATH")
+	}
 	var env []string
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
@@ -69,6 +83,37 @@ func shellEnv(port int) []string {
 		env = append(env, k+"="+v)
 	}
 	return env
+}
+
+// writeShims puts each adapter's wrapper scripts in a private directory that
+// only the shell's PATH sees.
+func writeShims(adapters []ambient.Adapter, port int) (string, error) {
+	var shims map[string]string
+	for _, a := range adapters {
+		s, err := a.Shell(ambient.Listener{Port: port})
+		if err != nil || len(s.Shims) == 0 {
+			continue
+		}
+		if shims == nil {
+			shims = map[string]string{}
+		}
+		for k, v := range s.Shims {
+			shims[k] = v
+		}
+	}
+	if len(shims) == 0 {
+		return "", nil
+	}
+	dir, err := os.MkdirTemp("", "atlas-shims-")
+	if err != nil {
+		return "", err
+	}
+	for name, body := range shims {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o700); err != nil { //nolint:gosec // G306: an executable shim
+			return "", err
+		}
+	}
+	return dir, nil
 }
 
 func runShell(cmd *cobra.Command, _ []string) error {
@@ -85,7 +130,65 @@ func runShell(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	upstream, err := anthropicUpstream()
+	h, err := startHost(p.Root)
+	if err != nil {
+		return err
+	}
+	l, st := h.Listener, h.Store
+	closed := false
+	defer func() {
+		if !closed {
+			_, _ = h.Close()
+		}
+	}()
+
+	adapters := ambient.For(p.Root, ambient.AtlasCommand())
+	shimDir, err := writeShims(adapters, l.Port)
+	if err != nil {
+		return err
+	}
+	if shimDir != "" {
+		defer os.RemoveAll(shimDir)
+	}
+
+	b, _ := st.Binding(ctx)
+	fmt.Fprintf(out, "Atlas shell for %s\n", p.Root)
+	fmt.Fprintf(out, "  capture: %s (Claude Code via the proxy on 127.0.0.1:%d)\n", onOff(b != nil && b.Enabled), l.Port)
+	fmt.Fprintf(out, "  memory:  %s\n", onOff(project.MemorySharing(p.Root)))
+	fmt.Fprintln(out, "Run claude as usual. Type exit to leave.")
+
+	sh := os.Getenv("SHELL")
+	if sh == "" {
+		sh = "/bin/sh"
+	}
+	child := exec.CommandContext(context.Background(), sh, "-i") //nolint:gosec // G204: the user's own shell
+	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
+	child.Env = shellEnv(l.Port, adapters, shimDir)
+	child.Dir = cwd
+	// The interactive shell handles ^C itself; this process waits it out.
+	signal.Ignore(os.Interrupt, syscall.SIGQUIT)
+	defer signal.Reset(os.Interrupt, syscall.SIGQUIT)
+	if err := child.Run(); err != nil {
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			return err
+		}
+	}
+	closed = true
+	if res, err := h.Close(); err == nil && res.Checkpoints > 0 {
+		fmt.Fprintf(out, "Linked %d session commit(s).\n", res.Checkpoints)
+	}
+	fmt.Fprintln(out, "Left the Atlas shell.")
+	return nil
+}
+
+// runCaptureLink walks new commits and links them to captured sessions.
+func runCaptureLink(cmd *cobra.Command, _ []string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	p, err := project.Discover(cmd.Context(), cwd)
 	if err != nil {
 		return err
 	}
@@ -102,37 +205,11 @@ func runShell(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer st.Close()
-	rec := record.New(st, p.Root)
-	l, err := listener.Start(p.Root, version, listener.Options{Recorder: rec, AnthropicUpstream: upstream})
+	res, err := gitlink.Link(cmd.Context(), st, p.Root, time.Now)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = l.Stop() }()
-
-	b, _ := st.Binding(ctx)
-	fmt.Fprintf(out, "Atlas shell for %s\n", p.Root)
-	fmt.Fprintf(out, "  capture: %s (Claude Code via the proxy on 127.0.0.1:%d)\n", onOff(b != nil && b.Enabled), l.Port)
-	fmt.Fprintf(out, "  memory:  %s\n", onOff(project.MemorySharing(p.Root)))
-	fmt.Fprintln(out, "Run claude as usual. Type exit to leave.")
-
-	sh := os.Getenv("SHELL")
-	if sh == "" {
-		sh = "/bin/sh"
-	}
-	child := exec.CommandContext(context.Background(), sh, "-i") //nolint:gosec // G204: the user's own shell
-	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
-	child.Env = shellEnv(l.Port)
-	child.Dir = cwd
-	// The interactive shell handles ^C itself; this process waits it out.
-	signal.Ignore(os.Interrupt, syscall.SIGQUIT)
-	defer signal.Reset(os.Interrupt, syscall.SIGQUIT)
-	if err := child.Run(); err != nil {
-		var ee *exec.ExitError
-		if !errors.As(err, &ee) {
-			return err
-		}
-	}
-	fmt.Fprintln(out, "Left the Atlas shell.")
+	fmt.Fprintf(cmd.OutOrStdout(), "Checked %d commit(s); %d checkpoint(s) written.\n", res.Commits, res.Checkpoints)
 	return nil
 }
 
@@ -157,7 +234,7 @@ func runEnv(cmd *cobra.Command, _ []string) error {
 		return errors.New("no capture listener is running for this Project; start one with atlas shell")
 	}
 	syntax, _ := cmd.Flags().GetString("shell")
-	for _, kv := range shellEnv(rf.Port) {
+	for _, kv := range shellEnv(rf.Port, ambient.For(p.Root, ambient.AtlasCommand()), "") {
 		k, v, _ := strings.Cut(kv, "=")
 		switch k {
 		case "ANTHROPIC_BASE_URL", "ATLAS_PROXY_PORT", "NO_PROXY", "no_proxy":
@@ -182,6 +259,7 @@ func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) 
 func runHook(agent, event string) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, _ []string) error {
 		raw, _ := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 4<<20))
+		traceHook(agent, event, raw)
 		var in struct {
 			SessionID string `json:"session_id"`
 			Cwd       string `json:"cwd"`
@@ -199,7 +277,7 @@ func runHook(agent, event string) func(*cobra.Command, []string) error {
 		if perr == nil && in.SessionID != "" {
 			if rf := listener.ReadRunFile(p.Root); rf != nil {
 				running = postHook(ctx, rf.Socket, listener.HookEvent{Agent: agent, Event: event,
-					SessionID: in.SessionID, Cwd: cwd, Prompt: in.Prompt}) == nil
+					SessionID: in.SessionID, Cwd: cwd, Prompt: in.Prompt, PIDs: procs.Ancestors(os.Getpid(), 4)}) == nil
 			}
 		}
 		if agent == "claude" && event == "session-start" {
@@ -337,4 +415,28 @@ func runStatusline(cmd *cobra.Command, _ []string) error {
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), line)
 	return nil
+}
+
+// traceHook appends the hook's field names (never their values) to the file
+// named by ATLAS_HOOK_TRACE, to record what each agent sends.
+func traceHook(agent, event string, raw []byte) {
+	path := os.Getenv("ATLAS_HOOK_TRACE")
+	if path == "" {
+		return
+	}
+	var m map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &m)
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	line, _ := json.Marshal(map[string]any{"agent": agent, "event": event, "fields": keys,
+		"ppid": os.Getppid(), "at": time.Now().UTC().Format(time.RFC3339Nano)})
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // G304: a path the user chose
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write(append(line, '\n'))
 }

@@ -25,6 +25,8 @@ type hookSession struct {
 	cwd     string
 	prompts []string
 	seen    time.Time
+	started time.Time
+	pids    []int // the hook process's ancestors, nearest first
 }
 
 // NewHooks returns an empty registry.
@@ -40,14 +42,78 @@ func (h *Hooks) get(id string) *hookSession {
 	return s
 }
 
-// SessionStart registers a session and its cwd.
-func (h *Hooks) SessionStart(id, cwd string) {
+// SessionStart registers a session, its cwd and the hook's ancestors.
+func (h *Hooks) SessionStart(id, cwd string, pids []int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	s := h.get(id)
 	if cwd != "" {
 		s.cwd = cwd
 	}
+	if s.started.IsZero() {
+		s.started = time.Now()
+	}
+	if len(pids) > 0 {
+		s.pids = pids
+	}
+}
+
+// Seen notes the ancestors of any hook of a session (a session may be
+// joined before its SessionStart arrives).
+func (h *Hooks) Seen(id, cwd string, pids []int) {
+	h.SessionStart(id, cwd, pids)
+}
+
+// Match finds the hook session a bridge belongs to: the nearest common
+// ancestor of the bridge (its first two ancestors) and a session's hook
+// (first three) must be the agent process, not one of exclude (the listener,
+// its ancestors, the shell it started). Failing that, the only session in the
+// same cwd that started within two minutes of at.
+func (h *Hooks) Match(bridge []int, cwd string, at time.Time, exclude func(pid int) bool) (string, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	head := func(p []int, n int) []int {
+		if len(p) > n {
+			return p[:n]
+		}
+		return p
+	}
+	var byPID, byCwd []string
+	for id, s := range h.sessions {
+		if c, ok := procsNearest(head(bridge, 2), head(s.pids, 3)); ok && !exclude(c) {
+			byPID = append(byPID, id)
+		}
+		if cwd != "" && s.cwd == cwd && !s.started.IsZero() && absDur(s.started.Sub(at)) <= 2*time.Minute {
+			byCwd = append(byCwd, id)
+		}
+	}
+	switch {
+	case len(byPID) == 1:
+		return byPID[0], true
+	case len(byPID) == 0 && len(byCwd) == 1:
+		return byCwd[0], true
+	}
+	return "", false
+}
+
+func absDur(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
+}
+
+func procsNearest(a, b []int) (int, bool) {
+	in := map[int]bool{}
+	for _, p := range b {
+		in[p] = true
+	}
+	for _, p := range a {
+		if in[p] {
+			return p, true
+		}
+	}
+	return 0, false
 }
 
 // Prompt queues the text the user typed.

@@ -1,6 +1,6 @@
 # ADR-0003: No memory secret is written to agent config files; the bridge authenticates by peer credentials (O3)
 
-**Status:** Accepted (2026-10-10, locked by the user with SPEC D1–D19). Records SPEC §1.2 D15 (formerly §10 O3).
+**Status:** Accepted (2026-10-10, locked by the user with SPEC D1–D19). Records SPEC §1.2 D15 (formerly §10 O3). **Superseded 2026-10-11 by ADR-0009 (ACP only): the proxy/ambient path is parked and not shipped.**
 
 ## Context
 

@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andybalholm/brotli"
+
 	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 )
@@ -250,3 +252,61 @@ type signalling struct {
 
 func (s signalling) Request(ex Exchange)  { s.a.Request(ex) }
 func (s signalling) Response(ex Exchange) { s.a.Response(ex); s.done <- struct{}{} }
+
+func TestHooksMatchBridgeToSession(t *testing.T) {
+	h := NewHooks()
+	// Two Claude sessions (pids 500 and 600) under one shell (pid 100).
+	h.SessionStart("sess-a", "/w", []int{501, 500, 100, 1})
+	h.SessionStart("sess-b", "/w", []int{601, 600, 100, 1})
+	shell := func(pid int) bool { return pid == 100 }
+	if id, ok := h.Match([]int{500, 100}, "/w", time.Now(), shell); !ok || id != "sess-a" {
+		t.Fatalf("by pid: %s %v", id, ok)
+	}
+	if id, ok := h.Match([]int{600, 100}, "/w", time.Now(), shell); !ok || id != "sess-b" {
+		t.Fatalf("by pid: %s %v", id, ok)
+	}
+	// Sharing only the shell is no match, and two sessions in one cwd are ambiguous.
+	if _, ok := h.Match([]int{700, 100}, "/w", time.Now(), shell); ok {
+		t.Fatal("matched through the shell")
+	}
+	// One session in a cwd, started just now: the time fallback.
+	h2 := NewHooks()
+	h2.SessionStart("only", "/x", nil)
+	if id, ok := h2.Match([]int{9}, "/x", time.Now(), shell); !ok || id != "only" {
+		t.Fatalf("cwd fallback: %s %v", id, ok)
+	}
+	if _, ok := h2.Match([]int{9}, "/x", time.Now().Add(10*time.Minute), shell); ok {
+		t.Fatal("matched a session that started long before")
+	}
+}
+
+func TestBrotliResponseIsParsed(t *testing.T) {
+	px, up, db, _, done := setup(t)
+	var br bytes.Buffer
+	bw := brotli.NewWriter(&br)
+	_, _ = bw.Write([]byte(`{"id":"msg_b","type":"message","model":"m","content":[{"type":"text","text":"squeezed"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":4}}`))
+	_ = bw.Close()
+	raw := br.Bytes()
+	up.replies = []func(http.ResponseWriter){func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "br")
+		_, _ = w.Write(raw)
+	}}
+	req, _ := http.NewRequest(http.MethodPost, px.URL+"/proxy/anthropic/v1/messages", strings.NewReader(strings.Replace(reqBody(prompt1), `"stream":true,`, "", 1)))
+	req.Header.Set("Accept-Encoding", "br") // the client asked for br: bytes come back untouched
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	<-done
+	if !bytes.Equal(got, raw) {
+		t.Fatal("brotli bytes were changed on the way to the agent")
+	}
+	var body string
+	_ = db.QueryRow(`SELECT body FROM agent_message WHERE role = 'assistant'`).Scan(&body)
+	if body != "squeezed" {
+		t.Fatalf("%q", body)
+	}
+}

@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,6 +13,7 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/listener"
 	"github.com/tryatlas/atlas-cli/internal/memory/record"
 	"github.com/tryatlas/atlas-cli/internal/memory/server"
+	"github.com/tryatlas/atlas-cli/internal/procs"
 	"github.com/tryatlas/atlas-cli/internal/project"
 )
 
@@ -131,7 +130,7 @@ func runMCPBridge(cmd *cobra.Command, args []string) error {
 	g := server.Grant{SessionID: server.UUID(), Agent: agent, Cwd: cwd}
 	if p, err := project.Discover(ctx, root); err == nil {
 		if rf := listener.ReadRunFile(p.Root); rf != nil && dialable(rf.Socket) {
-			return server.RunBridge(ctx, in, out, server.NewSocketForwarder(rf.Socket, g))
+			return server.RunBridge(ctx, in, out, server.NewSocketForwarder(rf.Socket, g, procs.Format(procs.Ancestors(os.Getpid(), 3))))
 		}
 	}
 	srv := server.New(version)
@@ -146,34 +145,4 @@ func dialable(sock string) bool {
 	}
 	_ = c.Close()
 	return true
-}
-
-// runServe runs the listener in the foreground until interrupted.
-func runServe(cmd *cobra.Command, _ []string) error {
-	if d, _ := cmd.Flags().GetBool("daemon"); d {
-		return notImplementedError{path: "atlas serve --daemon"}
-	}
-	if s, _ := cmd.Flags().GetBool("stop"); s {
-		return notImplementedError{path: "atlas serve --stop"}
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	p, err := project.Discover(cmd.Context(), cwd)
-	if err != nil {
-		return err
-	}
-	l, err := listener.Start(p.Root, version, listener.Options{})
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Serving shared memory for %s on %s. Ctrl-C to stop.\n", p.Root, l.Socket)
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	select {
-	case <-sig:
-	case <-cmd.Context().Done():
-	}
-	return l.Stop()
 }

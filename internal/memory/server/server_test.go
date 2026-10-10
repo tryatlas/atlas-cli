@@ -269,7 +269,7 @@ func TestUnixSocketAndReplay(t *testing.T) {
 	if info, _ := os.Stat(filepath.Dir(sock)); info.Mode().Perm() != 0o700 {
 		t.Fatalf("socket dir mode %v", info.Mode().Perm())
 	}
-	c := startBridge(t, NewSocketForwarder(sock, Grant{SessionID: "s-x", Agent: "gemini", Cwd: dir}))
+	c := startBridge(t, NewSocketForwarder(sock, Grant{SessionID: "s-x", Agent: "gemini", Cwd: dir}, ""))
 	handshake(c)
 	if out, e := c.tool("memory_remember", map[string]any{"kind": "fact", "content": "Over the socket"}); e != "" || out["outcome"] != "inserted" {
 		t.Fatalf("%v %s", out, e)

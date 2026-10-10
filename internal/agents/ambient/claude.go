@@ -1,11 +1,15 @@
 package ambient
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
+
+var _ Adapter = Claude{}
 
 // ClaudeID is the plugin id the CLI records Claude Code sessions under (SPEC §5.1).
 const ClaudeID = "claude-code"
@@ -45,10 +49,32 @@ func AtlasCommand() string {
 	return exe
 }
 
-// Detect reports whether the claude command is on PATH.
-func (c Claude) Detect() bool {
-	_, err := exec.LookPath("claude")
-	return err == nil
+// ID is the plugin id sessions are recorded under.
+func (c Claude) ID() string { return ClaudeID }
+
+// Detect reports whether the claude command is installed, and its version.
+func (c Claude) Detect(ctx context.Context) (bool, string) { return version(ctx, "claude") }
+
+// Configured reports a Project that already uses Claude Code.
+func (c Claude) Configured() bool {
+	for _, p := range []string{filepath.Join(c.Dir, ".claude"), c.mcpPath()} {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// Dialect is Anthropic Messages.
+func (c Claude) Dialect() Dialect { return Anthropic }
+
+// Shell points Claude Code at the proxy (SPEC §7.2). The user's previous
+// ANTHROPIC_BASE_URL is the proxy's upstream; the CLI never sets a blank
+// ANTHROPIC_API_KEY (that is a desktop quirk for ACP).
+func (c Claude) Shell(l Listener) (ShellSetup, error) {
+	return ShellSetup{Env: map[string]string{
+		"ANTHROPIC_BASE_URL": fmt.Sprintf("http://127.0.0.1:%d/proxy/anthropic", l.Port),
+	}}, nil
 }
 
 func (c Claude) mcpPath() string      { return filepath.Join(c.Dir, ".mcp.json") }

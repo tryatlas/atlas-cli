@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
+
+	"github.com/andybalholm/brotli"
 )
 
 var nextID atomic.Uint64
@@ -161,8 +163,10 @@ func decode(enc string, b []byte) []byte {
 		r = zr
 	case "deflate":
 		r = flate.NewReader(bytes.NewReader(b))
+	case "br":
+		r = brotli.NewReader(bytes.NewReader(b))
 	default:
-		return nil // e.g. br: forwarded, not parsed
+		return nil // forwarded, not parsed
 	}
 	out, err := io.ReadAll(io.LimitReader(r, maxTee))
 	if err != nil {

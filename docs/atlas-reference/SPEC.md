@@ -39,11 +39,10 @@ cd ~/work/backend
 atlas init                                   # pick / create org, pick / create cloud Project, write .atlas/
 atlas memory enable
 atlas capture enable
-atlas shell                                  # subshell with the capture proxy and env set
-  claude                                     # the user's normal agent command
-  codex                                      # ... any of them; every session captured, every agent shares memory
+atlas run codex                              # the product: drive any registry agent over ACP in a chat TUI;
+atlas run claude-code                        #   every session captured in full, synced to the cloud Timeline,
+atlas run gemini                             #   every agent handed shared memory over the wire
 atlas status                                 # who, where, what is on, health
-atlas run codex                              # optional: drive an ACP agent headlessly, full-fidelity capture
 ```
 
 ### 1.2 Decisions already made (do not re-open)
@@ -52,14 +51,14 @@ atlas run codex                              # optional: drive an ACP agent head
 |---|---|---|
 | D1 | **One binary named `atlas`, subcommands.** Not `atl`, not `tryatlas` (both are names the desktop's Linux launcher probes for a real app binary). | Mirrors `code`/`zed`; no desktop on a server to collide with. |
 | D2 | **Go + Bubble Tea v2** (`charm.land/bubbletea/v2`). | User's choice. |
-| D3 | **Users run their normal agent command.** The CLI never requires `atlas run <agent>` for capture. | Server users type `claude`, `codex`, `gemini`; ACP adapters are editor plumbing nobody runs by hand. |
-| D4 | **Capture of normal agents is by an HTTP proxy** between the agent and the model provider, not by hooks and never by reading the agents' transcript files. | Agent-agnostic; sees prompts, tool calls, tool results and output; ADR-0001 forbids scraping another program's storage. Hooks are a supplement for identity, not the source of content. |
-| D5 | **Shared memory reaches normal agents through their MCP config files**, one writer per agent (`.mcp.json`, `.gemini/settings.json`, Codex config). | Only route that gives an agent *tools* without an ACP client. |
+| D3 | **Superseded by D20 on 2026-10-11.** Originally: users run their normal agent command and the CLI never requires `atlas run`. Now: `atlas run <agent>` over ACP is the product; the native-command path is an optional add-on. | The user chose parity with the desktop (every ACP agent captured in full, synced, memory-aware) over keeping the agents' own terminal UIs. |
+| D4 | **Parked by D20.** Capture of normal agents was to be by an HTTP proxy between the agent and the model provider, not by hooks and never by reading the agents' transcript files. | Agent-agnostic; sees prompts, tool calls, tool results and output; ADR-0001 forbids scraping another program's storage. Hooks are a supplement for identity, not the source of content. |
+| D5 | **Parked by D20.** Shared memory was to reach normal agents through their MCP config files, one writer per agent (`.mcp.json`, `.gemini/settings.json`, Codex config). | Only route that gives an agent *tools* without an ACP client. |
 | D6 | **Memory is pull-only.** Nothing is injected into prompts or system prompts. | ADR-0010. The proxy could inject; it must not. |
-| D7 | **The ambient integration is per-agent adapters** behind one small interface, and the new repo records this as its own ADR. | It knowingly breaks the desktop's "no agent gets special treatment" rule (ADR-0002), which still applies to the ACP path. |
-| D8 | **`atlas run <agent>` over ACP is a secondary, optional path** for headless automation (CI, cron), using the same registry as the desktop Marketplace, no hardcoded agent list. | ADR-0002: agents come from the registry, capability is discovered at `initialize`. |
-| D9 | **Env vars reach the user's shell through `atlas shell`** (a subshell) with `eval "$(atlas env)"` as the scripting fallback. | A process cannot set its parent's environment. |
-| D10 | **Agent-visible status**: Claude Code status line + SessionStart banner; MCP server named `atlas` so tool calls render as `atlas - memory_search`. | Users asked to see "Claude using Atlas". |
+| D7 | **Parked by D20.** The ambient integration was to be per-agent adapters behind one small interface, and the new repo records this as its own ADR. | It knowingly breaks the desktop's "no agent gets special treatment" rule (ADR-0002), which still applies to the ACP path. |
+| D8 | **`atlas run <agent>` over ACP is the primary path** (see D20), using the same registry as the desktop Marketplace, no hardcoded agent list, capability discovered at `initialize`. It also serves headless automation (CI, cron) with `--prompt` and no TUI. | ADR-0002: agents come from the registry, capability is discovered at `initialize`. |
+| D9 | **Parked by D20.** Env vars were to reach the user's shell through `atlas shell` (a subshell) with `eval "$(atlas env)"` as the scripting fallback. | A process cannot set its parent's environment. |
+| D10 | **Parked by D20** except the server name. Agent-visible status was to be the Claude Code status line + SessionStart banner; MCP server named `atlas` so tool calls render as `atlas - memory_search`. | Users asked to see "Claude using Atlas". |
 | D11 | **The CLI shares the desktop's on-disk formats** (`.atlas/sessions.db`, `.atlas/memory/memory.sqlite`, the auth session file) rather than inventing its own. | Same folder opened later in the desktop must show the same record. |
 | D12 | **Secrets never persist.** The JWT lives in memory; the proxy never logs an `Authorization` header; every stored text passes the redactor. | Same posture as the desktop. |
 | D13 | **No cross-machine memory sync in v1.** The record stays local per checkout. The one manual bridge is `atlas memory export` / `atlas memory import` in the desktop's Agent Memory Repo line format, committed by a person; imports land as candidates. The CLI never purges, exposes `atlas memory verify` for the chain, and a server-side revision log is a later ADR. CLI ADR-0001. | Nothing exists server-side today (§5.8); the file format and candidate rule already exist in the desktop. |
@@ -68,6 +67,7 @@ atlas run codex                              # optional: drive an ACP agent head
 | D16 | **Codex under a ChatGPT subscription is captured only through `atlas run codex`.** Memory works ambiently (MCP does not depend on auth mode); the ambient path records nothing and `atlas status` says so, naming `atlas run codex`. No `notify` hook in v1 (turn-end only, and it displaces the user's own notifier). API-key Codex: the `[model_providers.atlas]` definition may live in `~/.codex/config.toml` but is never selected there; inside `atlas shell` a `codex` shim on a shell-only PATH entry prepends `-c model_provider=atlas`. Mode is detected with `codex login status`, never by reading `~/.codex/auth.json`. CLI ADR-0004. | Subscription traffic bypasses every OpenAI-compatible base URL; a user-level provider selection would break `codex` outside the shell. |
 | D17 | **Proxy usage goes through the same cumulative-delta recorder as the ACP path.** The proxy keeps a per-session running sum of per-request usage (seeded from `usage_cursor` on first sight) and calls the one `RecordUsage(session, turn, model, cumulative)`; the cursor diff then equals the request's own usage. One request counts once: streamed Anthropic usage is read from `message_start` plus the last `message_delta`, keyed by response id. Verified against the desktop Usage tab during the acceptance test. CLI ADR-0005. | One write path for `usage_delta`; the desktop importer already sums per-request usage for Claude Code sessions, so the totals agree. |
 | D18 | **Windows is out of scope for v1.** Targets: linux/amd64, linux/arm64, darwin/arm64. | No `setsid`, no login-shell probe, no desktop helper there either. |
+| D20 | **ACP only, the app's way** (2026-10-11, supersedes D3, D4, D5, D7, D9, D10 and reorders D8). There is no per-agent code and no proxy path in the product. `atlas run <agent>` drives any registry agent over ACP inside a Bubble Tea chat TUI that does what the desktop chat panel does: streaming text and thinking, tool-call cards, permission prompts, elicitation forms, mode and model pickers, slash commands from `available_commands_update`, cancel. Every session is recorded by the one recorder with full fidelity, synced to the cloud Timeline, and handed `atlas_memory` over `mcpServers` with an in-memory bearer. The proxy, the ambient adapters, `atlas shell`, hooks and status-line writers built in Phase 6 are **parked on a branch, not shipped**; §7 is kept only as a record. CLI ADR-0009. | Parity with the desktop for every ACP agent; one recorder; any agent in the registry works the day it appears, with nothing added one by one. The cost is building the chat TUI and giving up the agents' native UIs. |
 | D19 | **`atlas init` in a subdirectory of a repository is allowed.** It warns that capture is recorded for that folder only while memory is shared with the whole repository. Project discovery walks up from the cwd to the nearest ancestor with a `binding` row, stopping at the scope root; `atlas shell` captures into the Project it was started in, with the agent's real `cwd` from hook payloads; memory always resolves the scope root of the session's cwd. CLI ADR-0007. | Matches how the desktop keys both stores. |
 
 ### 1.3 Constraints inherited from Atlas ADRs
@@ -82,7 +82,7 @@ atlas run codex                              # optional: drive an ACP agent head
 
 ### 1.4 What the CLI is not
 
-- Not a chat client. The chat UI is the agent the user chose. The TUI is `atlas shell`, `atlas status`, the memory browser and the login/init wizards.
+- Not a wrapper around the agents' own terminal UIs. The CLI **is** the chat client (D20): an ACP agent has no screen of its own, and the CLI never touches an agent's config files, hooks or model traffic.
 - Not the native Atlas Agent. The engine is Rust and ships only in the desktop app.
 - Not a cross-machine memory sync. **Shared memory has no backend today** (§5.8); the CLI makes agents *in one folder on one machine* share memory, which is exactly what the journey asks. Cross-machine sharing is D13 (export and import through git).
 
@@ -101,20 +101,15 @@ internal/capture/store/    sessions.db v10: rows, blobs, lock, counter          
 internal/capture/record/   turn/message/tool-call/file-touch recorder            (§6.4)
 internal/capture/git/      commit walk + link rule (optional in v1)              (§6.6)
 internal/capture/sync/     ingest drain: blobs first, batches, backoff           (§6.7)
-internal/proxy/            Anthropic / OpenAI-Responses / Gemini pass-through    (§7.2)
-internal/agents/ambient/   adapters: claude-code, codex, gemini (MCP cfg, hooks, status line) (§7.3–7.6)
-internal/agents/acp/       registry, install, Node runtime, ACP client           (§8)
-internal/tui/              Bubble Tea v2 models: shell, status, memory, login, init
+internal/agents/acp/       registry, install, Node runtime, ACP client — the primary path (§8)
+internal/tui/              Bubble Tea v2 models: chat (the ACP session screen: stream, tool cards, permissions, elicitation, pickers), shell, status, memory, login, init
 ```
 
-Process model: `atlas shell` and `atlas run` are the only long-lived processes.
+Process model: `atlas run` and `atlas serve --daemon` are the only long-lived processes.
 Each starts **one** in-process listener on `127.0.0.1:<random port>` that serves
-both the MCP memory server (`/mcp`) and the capture proxy (`/proxy/anthropic`,
-`/proxy/openai`, `/proxy/gemini`), so there is one port to hand out and one
-lifetime to manage. Hooks post to the same listener (`/hook`). When the shell
-exits the listener stops, the writer lock on `sessions.db` is released, and
-agents launched outside the shell fall back to talking to the providers
-directly because the env vars are gone with the shell.
+the MCP memory server (`/mcp`), handed to every ACP session over `mcpServers`
+with a per-session bearer held in memory. When `atlas run` exits the listener
+stops and the writer lock on `sessions.db` is released.
 
 ---
 
@@ -1040,7 +1035,7 @@ Promotion of local history: flip the binding and every `local` row to
 
 ---
 
-## 7. Ambient integration with normal agents
+## 7. Ambient integration with normal agents (PARKED by D20 — not in the product; kept as a record of the Phase 6 build)
 
 ### 7.1 The adapter interface (new ADR in the CLI repo)
 
@@ -1166,7 +1161,7 @@ one detached, `atlas serve --stop` ends it).
 
 ---
 
-## 8. `atlas run <agent>` over ACP (secondary path)
+## 8. `atlas run <agent>` over ACP (the product; D20)
 
 Source: `crates/atlas-agent-servers/src/*`, `crates/atlas-agent-store/src/*`,
 `crates/atlas-agent-manager/src/*`, `src-tauri/src/commands/memory_server/offers.rs`, ADR-0008.

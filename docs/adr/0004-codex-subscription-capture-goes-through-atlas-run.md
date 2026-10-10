@@ -1,6 +1,6 @@
 # ADR-0004: Codex under a ChatGPT subscription is captured only through `atlas run codex` (O4)
 
-**Status:** Accepted (2026-10-10, locked by the user with SPEC D1–D19). Records SPEC §1.2 D16 (formerly §10 O4).
+**Status:** Accepted (2026-10-10, locked by the user with SPEC D1–D19). Records SPEC §1.2 D16 (formerly §10 O4). **Superseded 2026-10-11 by ADR-0009 (ACP only): the proxy/ambient path is parked and not shipped.**
 
 ## Context
 

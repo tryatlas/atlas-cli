@@ -434,3 +434,129 @@ Not verified / known gaps:
 - Git linkage (§6.6) is not built; the desktop links commits on open.
 - The adapter is a concrete type; the shared `Adapter` interface
   (ADR-0000) will be extracted with the Gemini and Codex adapters in Phase 7.
+
+## Phase 6b — closing the Phase 6 gaps (2026-10-11, desktop checklist pending)
+
+Built:
+
+- **Memory and capture share a session id** (ADR-0003's open check):
+  - `internal/procs` reads process ancestry (`/proc` on Linux, `ps` on
+    macOS);
+  - hooks send their ancestor pids to the listener, and the bridge sends its
+    own over the peer-checked socket (`X-Atlas-PIDs`);
+  - the listener joins a bridge to a hook session when their nearest common
+    ancestor is the agent process, never the listener, its ancestors or the
+    shell it started; failing that, the only session in the same cwd started
+    within two minutes;
+  - the MCP session is then renamed to Claude's session id, with its clock
+    moved.
+- **Hook field trace**: `ATLAS_HOOK_TRACE=<file>` records each hook's field
+  names, never values.
+- **`Adapter` interface** (`internal/agents/ambient/adapter.go`). It follows
+  SPEC §7.1, with `Shell(Listener) (ShellSetup{Env, Shims})` replacing
+  `ProxyEnv` (ADR-0004) and `Configured()` added. The Claude adapter is
+  registered behind it. `atlas shell`, `env` and `memory/capture enable`
+  iterate adapters; shims go to a private temp directory prepended to PATH
+  in the shell only.
+- **Git linkage, watcher-free** (`internal/capture/git`):
+  - runs on `atlas shell` exit and on a new `atlas capture link`;
+  - the walk: cursor → `rev-list --first-parent --reverse` (max 200 without
+    a usable cursor; `recovered=1` when the cursor commit is gone); no
+    cursor and no candidates sets the cursor to HEAD; nothing happens mid
+    rebase, cherry-pick or merge;
+  - a merge links its side commits; the asymmetric rule (deleted ↔ deleted;
+    existed-in-parent and existed_before → path alone; else blob sha, the
+    `--filters` sha, or sketch containment ≥ 0.5); a session must have
+    started by the commit time; paths match case-insensitively and through
+    renames;
+  - checkpoint upsert keyed (session_id, commit_sha) with patch-id, branch,
+    author, files and numstat; touches consumed with the +1 s bound; cursor
+    advanced per commit.
+  - **Not built:** rewrite reconciliation (relink by patch-id after a
+    rebase, orphaning, recovering orphans). The desktop does it when it
+    opens the folder.
+- **Brotli**: the parser's copy is decoded (andybalholm/brotli, pure Go);
+  forwarding was already untouched.
+- `docs/acceptance/desktop.md`: the one-page desktop checklist.
+
+Verified live (Claude Code 2.1.296, `~/Codes/atlas-test-3`):
+
+- **Hooks fire in both modes**, all four events. Fields received:
+  - SessionStart: `cwd, hook_event_name, session_id, source,
+    transcript_path`, plus `model` in interactive mode;
+  - UserPromptSubmit: `cwd, hook_event_name, permission_mode, prompt,
+    prompt_id, session_id, transcript_path`;
+  - Stop: `background_tasks, cwd, effort, hook_event_name,
+    last_assistant_message, permission_mode, prompt_id, session_crons,
+    session_id, stop_hook_active, transcript_path`;
+  - SessionEnd: `cwd, hook_event_name, prompt_id, reason, session_id,
+    transcript_path`.
+  `transcript_path` is never read (ADR-0001). The interactive run went
+  through `expect`; I accepted Claude's folder-trust prompt for this scratch
+  folder.
+- **Join**: the decision Claude stored in a `-p` run carries session
+  `5d908253…`, the captured session's native id. `memory_why notes.md` names
+  both captured sessions with their titles and lists that decision under the
+  session that wrote it.
+- **Git linkage**: committing `notes.md` and running `atlas capture link`
+  wrote two checkpoints for commit `4b3c934` (two sessions wrote it,
+  matching the desktop's "two Sessions → two Checkpoints"); all three
+  touches consumed; cursor at the commit.
+
+Not verified / open:
+
+- The desktop checklist (Timeline, duplicates, Usage totals, checkpoints,
+  Memory Health) needs the user.
+- Checkpoint `insertions`/`deletions` are the whole commit's numstat. The
+  evidence does not say whether the desktop counts only the linked files.
+- The `hook codex notify` stub will be removed (ADR-0004: no notify hook in
+  v1).
+
+## Phase 7a — cloud sync
+
+Built:
+
+- **Outbox** (`internal/capture/store/outbox.go`): pending rows in drain
+  order (sessions by `started_at`, messages and tool calls by `seq`,
+  checkpoints by `created_at`; rows of aborted turns never leave);
+  `RetireFailed` (`sync_attempts >= 5` → `failed` at the start of a drain);
+  guarded `MarkSent` (a row whose hashed content changed during the upload
+  stays pending); `BumpAttempts`, `MarkFailed`, `RetryFailed`,
+  `SetDrainState`, `OutboxCounts`, `ReadBlob` (a hash mismatch counts as
+  missing).
+- **Drain** (`internal/capture/sync`): the four artifact types with the
+  exact key order and the four `contentHash` formulas (null columns format
+  as the empty string); blobs `PUT` before the batch that references them
+  (2xx/409 ok, 413 or missing locally fails the row); batches ≤100
+  artifacts and ≤4 MiB; 401 → refresh once per pass; 403 →
+  `drain_state='not_authorized'` and no further calls; 429 → Retry-After;
+  5xx or no answer → offline; another 4xx bisects to the poison row, which
+  fails; `"accepted":false` counts an attempt; a row absent from a non-empty
+  `results` list is treated as accepted, like an empty body. The pass stops
+  starting work after 3 s.
+- **Runner**: drains at start, every 30 s once the backoff allows (30 s
+  doubling to 15 min, `max(Retry-After, backoff)`), and on demand.
+- `atlas shell` and `atlas serve` share one host (`cmd/atlas/host.go`):
+  writer lock, recorder + proxy, memory, drain. On exit: git link, then
+  one last drain pass.
+- `atlas serve` now runs capture too; `--daemon` re-runs it detached
+  (`Setsid`, log in `.atlas/cli-serve.log`) and waits for its run file;
+  `--stop` signals only a daemon's listener (the run file records
+  `daemon: true`).
+- `atlas capture sync` and `atlas capture retry`: in-process when the store
+  is free, else `POST /sync` on the running listener's socket. A human sync
+  clears `not_authorized` and tries again.
+
+Verified live (`~/Codes/atlas-test-cloud`, created in "Atlas org" as cloud
+Project `atlas-cli-acceptance`, id `01M4KNA93EHF0J98GEC08F6JZ2`):
+
+- `atlas serve --daemon`, `eval "$(atlas env)"`, `claude -p` wrote
+  `notes.md`; `atlas capture sync` → the listener drained: session, two
+  messages and one tool call `sent`, no attempts used.
+- Commit `66a94e4`, `atlas serve --stop` → linked on exit and the
+  checkpoint `sent`; `drain_state` stays `ok`.
+
+Not verified: that the session shows in the cloud Workspace and in a
+teammate's Timeline. That needs the web app or a second account (the user).
+Open: the evidence does not say how the desktop treats a row that is
+missing from a non-empty `results` list; the CLI counts it as accepted.

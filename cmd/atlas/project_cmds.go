@@ -362,11 +362,11 @@ func runMemoryGate(enabled bool) func(*cobra.Command, []string) error {
 			state = "on"
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Shared memory is %s for %s.\n", state, dir)
-		return applyAdapters(cmd, dir, func(c ambient.Claude, st *ambient.State) (string, error) {
+		return applyAdapters(cmd, dir, func(a ambient.Adapter, st *ambient.State) (string, error) {
 			if enabled {
-				return "Claude Code: MCP server \"atlas\" in .mcp.json", c.InstallMCP(st)
+				return a.ID() + `: MCP server "atlas" installed`, a.InstallMCP(st)
 			}
-			return "Claude Code: MCP server removed", c.RemoveMCP(st)
+			return a.ID() + ": MCP server removed", a.RemoveMCP(st)
 		}, enabled)
 	}
 }
@@ -402,18 +402,18 @@ func runCaptureGate(enabled bool) func(*cobra.Command, []string) error {
 		} else {
 			fmt.Fprintf(cmd.OutOrStdout(), "Capture is paused for %s. What was recorded still syncs.\n", p.Root)
 		}
-		return applyAdapters(cmd, p.Root, func(c ambient.Claude, st *ambient.State) (string, error) {
+		return applyAdapters(cmd, p.Root, func(a ambient.Adapter, st *ambient.State) (string, error) {
 			if enabled {
-				if err := c.InstallHooks(st); err != nil {
+				if err := a.InstallHooks(st); err != nil {
 					return "", err
 				}
 				st.SetCaptureProxy(true)
-				return "Claude Code: hooks and status line in .claude/settings.json; run claude inside atlas shell", c.InstallStatus(st)
+				return a.ID() + ": hooks and status line installed; run the agent inside atlas shell", a.InstallStatus(st)
 			}
-			if err := c.RemoveHooks(st); err != nil {
+			if err := a.RemoveHooks(st); err != nil {
 				return "", err
 			}
-			return "Claude Code: hooks and status line removed", c.RemoveStatus(st)
+			return a.ID() + ": hooks and status line removed", a.RemoveStatus(st)
 		}, enabled)
 	}
 }
@@ -493,26 +493,28 @@ func printGates(w io.Writer, dir string, b *store.Binding) {
 
 // applyAdapters runs an adapter change for each agent the Project uses and
 // records it in .atlas/cli.json. Installing needs the agent to be present
-// (on PATH, or already configured in the folder); removing always runs.
-func applyAdapters(cmd *cobra.Command, dir string, apply func(ambient.Claude, *ambient.State) (string, error), installing bool) error {
+// (installed, or already configured in the folder); removing always runs.
+func applyAdapters(cmd *cobra.Command, dir string, apply func(ambient.Adapter, *ambient.State) (string, error), installing bool) error {
 	st, err := ambient.LoadState(dir)
 	if err != nil {
 		return err
 	}
-	c := ambient.Claude{Dir: dir, Atlas: ambient.AtlasCommand()}
-	if installing && !c.Detect() && !exists(filepath.Join(dir, ".claude")) && !exists(filepath.Join(dir, ".mcp.json")) {
-		fmt.Fprintln(cmd.OutOrStdout(), "Claude Code not found; nothing to configure.")
-		return st.Save()
+	found := false
+	for _, a := range ambient.For(dir, ambient.AtlasCommand()) {
+		if installing {
+			if ok, _ := a.Detect(cmd.Context()); !ok && !a.Configured() {
+				continue
+			}
+		}
+		found = true
+		msg, err := apply(a, st)
+		if err != nil {
+			return fmt.Errorf("%s: %w", a.ID(), err)
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), msg)
 	}
-	msg, err := apply(c, st)
-	if err != nil {
-		return err
+	if installing && !found {
+		fmt.Fprintln(cmd.OutOrStdout(), "No supported agent found; nothing to configure.")
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), msg)
 	return st.Save()
-}
-
-func exists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }
