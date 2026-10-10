@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -36,14 +35,10 @@ func newRootCmd() *cobra.Command {
 		newInitCmd(),
 		newMemoryCmd(),
 		newCaptureCmd(),
-		newShellCmd(),
-		newEnvCmd(),
 		newServeCmd(),
 		withRun(leaf("status", "Show login, organisation, Project, gates, capture health and agent integrations", cobra.NoArgs), runStatus),
 		newRunCmd(),
 		newMCPBridgeCmd(),
-		newHookCmd(),
-		newStatuslineCmd(),
 	)
 	return root
 }
@@ -106,8 +101,8 @@ func newInitCmd() *cobra.Command {
 
 func newMemoryCmd() *cobra.Command {
 	return group("memory", "Shared memory for agents in this repository",
-		withRun(leaf("enable", "Turn shared memory on and install the agents' MCP entries", cobra.NoArgs), runMemoryGate(true)),
-		withRun(leaf("disable", "Turn shared memory off and remove the agents' MCP entries", cobra.NoArgs), runMemoryGate(false)),
+		withRun(leaf("enable", "Turn shared memory on for this repository", cobra.NoArgs), runMemoryGate(true)),
+		withRun(leaf("disable", "Turn shared memory off for this repository", cobra.NoArgs), runMemoryGate(false)),
 		withRun(leaf("verify", "Verify the memory revision hash chain", cobra.NoArgs), runMemoryVerify),
 		withRun(leaf("export <dir>", "Export durable memories as an Agent Memory Repo (MEMORY.md and one file per kind)", cobra.ExactArgs(1)), runMemoryExport),
 		withRun(leaf("import <file-or-dir>", "Import Agent Memory Repo files as candidate memories", cobra.ExactArgs(1)), runMemoryImport),
@@ -116,28 +111,16 @@ func newMemoryCmd() *cobra.Command {
 
 func newCaptureCmd() *cobra.Command {
 	return group("capture", "Session capture for agents run in this folder",
-		withRun(leaf("enable", "Turn capture on and install hooks and the status line", cobra.NoArgs), runCaptureGate(true)),
-		withRun(leaf("disable", "Turn capture off and remove hooks and the status line", cobra.NoArgs), runCaptureGate(false)),
+		withRun(leaf("enable", "Turn session capture on for this Project", cobra.NoArgs), runCaptureGate(true)),
+		withRun(leaf("disable", "Pause session capture for this Project (what was recorded still syncs)", cobra.NoArgs), runCaptureGate(false)),
 		withRun(leaf("sync", "Upload captured sessions to the cloud Project now", cobra.NoArgs), runCaptureSync(false)),
 		withRun(leaf("retry", "Re-queue sessions that failed to sync, then sync", cobra.NoArgs), runCaptureSync(true)),
 		withRun(leaf("link", "Link captured sessions to the commits that carried their work", cobra.NoArgs), runCaptureLink),
 	)
 }
 
-func newShellCmd() *cobra.Command {
-	c := withRun(leaf("shell", "Start a subshell with the capture proxy and memory server running", cobra.NoArgs), runShell)
-	c.Flags().String("agent", "all", "agents to route through the proxy: claude, codex, gemini or all")
-	return c
-}
-
-func newEnvCmd() *cobra.Command {
-	c := withRun(leaf("env", "Print the environment for a running listener, for eval", cobra.NoArgs), runEnv)
-	c.Flags().String("shell", "sh", "output syntax: sh or fish")
-	return c
-}
-
 func newServeCmd() *cobra.Command {
-	c := withRun(leaf("serve", "Run the listener (memory server and capture proxy) without a subshell", cobra.NoArgs), runServe)
+	c := withRun(leaf("serve", "Run the Project's listener (memory server and sync drain)", cobra.NoArgs), runServe)
 	c.Flags().Bool("daemon", false, "start the listener detached")
 	c.Flags().Bool("stop", false, "stop a detached listener")
 	c.MarkFlagsMutuallyExclusive("daemon", "stop")
@@ -149,41 +132,7 @@ func newRunCmd() *cobra.Command {
 }
 
 func newMCPBridgeCmd() *cobra.Command {
-	c := withRun(leaf("mcp-bridge [url]", "Carry MCP over stdio to the local memory server (used by agents)", cobra.MaximumNArgs(1)), runMCPBridge)
-	c.Hidden = true
-	c.Flags().String("project", "", "launch dir whose listener to reach")
-	c.Flags().String("agent", "", "agent id for the memory grant")
-	return c
-}
-
-// hookEvents lists the hook entry points each ambient adapter installs (SPEC §7.4).
-var hookEvents = map[string][]string{
-	"claude": {"session-start", "user-prompt-submit", "stop", "session-end"},
-	"gemini": {"session-start"},
-	"codex":  {"notify"},
-}
-
-func newHookCmd() *cobra.Command {
-	c := group("hook", "Hook entry points called by agents")
-	c.Hidden = true
-	for _, agent := range []string{"claude", "gemini", "codex"} {
-		events := make([]*cobra.Command, 0, len(hookEvents[agent]))
-		for _, ev := range hookEvents[agent] {
-			h := leaf(ev, fmt.Sprintf("%s %s hook", agent, ev), cobra.NoArgs)
-			if agent == "claude" {
-				h.RunE = runHook(agent, ev)
-			}
-			events = append(events, h)
-		}
-		c.AddCommand(group(agent, "Hooks for "+agent, events...))
-	}
-	return c
-}
-
-func newStatuslineCmd() *cobra.Command {
-	c := group("statusline", "Status line commands called by agents",
-		withRun(leaf("claude", "Print the Claude Code status line", cobra.NoArgs), runStatusline),
-	)
+	c := withRun(leaf("mcp-bridge <url>", "Carry MCP over stdio to a loopback memory server, with ATLAS_MCP_TOKEN (used by agents)", cobra.ExactArgs(1)), runMCPBridge)
 	c.Hidden = true
 	return c
 }

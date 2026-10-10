@@ -55,7 +55,7 @@ func New(st *store.Store, root string) *Recorder {
 
 // Session names one agent session.
 type Session struct {
-	Agent    string // plugin id: claude-code, codex, gemini
+	Agent    string // the registry id of the agent
 	NativeID string // the agent's own session id
 	Cwd      string
 	Model    string

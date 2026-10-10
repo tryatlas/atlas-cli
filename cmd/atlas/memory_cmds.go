@@ -3,17 +3,12 @@ package main
 import (
 	"errors"
 	"fmt"
-	"net"
 	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/tryatlas/atlas-cli/internal/listener"
 	"github.com/tryatlas/atlas-cli/internal/memory/record"
 	"github.com/tryatlas/atlas-cli/internal/memory/server"
-	"github.com/tryatlas/atlas-cli/internal/procs"
 	"github.com/tryatlas/atlas-cli/internal/project"
 )
 
@@ -90,59 +85,13 @@ func gateRoot(cmd *cobra.Command, cwd string) string {
 	return cwd
 }
 
-// runMCPBridge carries MCP over stdio. With a URL (the desktop's form) it
-// posts there with ATLAS_MCP_TOKEN; otherwise it reaches the listener of
-// --project over its Unix socket, or serves memory in this process when no
-// listener runs.
+// runMCPBridge carries MCP over stdio to a loopback memory server, the
+// desktop's bridge (ADR-0019): `atlas mcp-bridge <url>` with the session's
+// bearer in ATLAS_MCP_TOKEN, never in argv.
 func runMCPBridge(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	in, out := cmd.InOrStdin(), cmd.OutOrStdout()
-	if len(args) == 1 {
-		f, err := server.NewTCPForwarder(args[0], os.Getenv("ATLAS_MCP_TOKEN"))
-		if err != nil {
-			return err
-		}
-		return server.RunBridge(ctx, in, out, f)
-	}
-	agent, _ := cmd.Flags().GetString("agent")
-	if agent == "" {
-		agent = "unknown"
-	}
-	dir, _ := cmd.Flags().GetString("project")
-	cwd, err := os.Getwd()
+	f, err := server.NewTCPForwarder(args[0], os.Getenv("ATLAS_MCP_TOKEN"))
 	if err != nil {
 		return err
 	}
-	if dir == "" {
-		dir = cwd
-	}
-	root, err := project.Canonical(dir)
-	if err != nil {
-		return err
-	}
-	if c, err := project.Canonical(cwd); err == nil {
-		if rel, err := filepath.Rel(root, c); err == nil && !filepath.IsAbs(rel) && rel != ".." && (len(rel) < 3 || rel[:3] != "../") {
-			cwd = c
-		} else {
-			cwd = root
-		}
-	}
-	g := server.Grant{SessionID: server.UUID(), Agent: agent, Cwd: cwd}
-	if p, err := project.Discover(ctx, root); err == nil {
-		if rf := listener.ReadRunFile(p.Root); rf != nil && dialable(rf.Socket) {
-			return server.RunBridge(ctx, in, out, server.NewSocketForwarder(rf.Socket, g, procs.Format(procs.Ancestors(os.Getpid(), 3))))
-		}
-	}
-	srv := server.New(version)
-	defer srv.Close()
-	return server.RunBridge(ctx, in, out, server.NewLocalForwarder(srv, g))
-}
-
-func dialable(sock string) bool {
-	c, err := net.DialTimeout("unix", sock, time.Second)
-	if err != nil {
-		return false
-	}
-	_ = c.Close()
-	return true
+	return server.RunBridge(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), f)
 }

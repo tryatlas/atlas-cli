@@ -19,7 +19,6 @@ import (
 
 	"github.com/tryatlas/atlas-cli/internal/auth"
 	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 	capsync "github.com/tryatlas/atlas-cli/internal/capture/sync"
 	"github.com/tryatlas/atlas-cli/internal/hosts"
@@ -28,8 +27,8 @@ import (
 )
 
 // host is a Project's running listener with everything that needs the
-// writer lock: the recorder behind the capture proxy, and the sync drain.
-// atlas shell and atlas serve both run one.
+// writer lock: the capture store and the sync drain. atlas serve runs one;
+// atlas run will run one in-process.
 type host struct {
 	Root     string
 	Listener *listener.Listener
@@ -62,10 +61,6 @@ func (signedOut) Invalidate()                           {}
 // startHost takes the writer lock, opens the capture store, and starts the
 // listener and the drain.
 func startHost(root string) (*host, error) {
-	upstream, err := anthropicUpstream()
-	if err != nil {
-		return nil, err
-	}
 	lock, err := store.Lock(root)
 	if errors.Is(err, store.ErrLocked) {
 		return nil, errors.New(lockedHelp)
@@ -79,7 +74,7 @@ func startHost(root string) (*host, error) {
 		return nil, err
 	}
 	runner := capsync.NewRunner(syncClient(), st)
-	l, err := listener.Start(root, version, listener.Options{Recorder: record.New(st, root), AnthropicUpstream: upstream, Sync: runner,
+	l, err := listener.Start(root, version, listener.Options{Sync: runner,
 		Daemon: os.Getenv(daemonEnv) != ""})
 	if err != nil {
 		_ = st.Close()
@@ -263,8 +258,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if os.Getenv(daemonEnv) == "" {
-		fmt.Fprintf(out, "Serving %s: memory on %s, capture proxy on 127.0.0.1:%d.\n", p.Root, h.Listener.Socket, h.Listener.Port)
-		fmt.Fprintln(out, "In another terminal: eval \"$(atlas env)\", then run your agent. Ctrl-C to stop.")
+		fmt.Fprintf(out, "Serving %s: memory on %s, sync drain running. Ctrl-C to stop.\n", p.Root, h.Listener.MCPURL())
 	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
@@ -307,8 +301,7 @@ func startDaemon(cmd *cobra.Command, root string) error {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if rf := listener.ReadRunFile(root); rf != nil && rf.PID == pid {
-			fmt.Fprintf(cmd.OutOrStdout(), "Listener started (pid %d), capture proxy on 127.0.0.1:%d.\n", pid, rf.Port)
-			fmt.Fprintln(cmd.OutOrStdout(), "Run eval \"$(atlas env)\" in a terminal, then your agent. Stop it with atlas serve --stop.")
+			fmt.Fprintf(cmd.OutOrStdout(), "Listener started (pid %d) on 127.0.0.1:%d. Stop it with atlas serve --stop.\n", pid, rf.Port)
 			return nil
 		}
 		if !alive(pid) {
@@ -327,7 +320,7 @@ func stopDaemon(out interface{ Write([]byte) (int, error) }, root string) error 
 		return nil
 	}
 	if !rf.Daemon {
-		return fmt.Errorf("the listener (pid %d) belongs to an atlas shell or a foreground atlas serve; exit that instead", rf.PID)
+		return fmt.Errorf("the listener (pid %d) belongs to atlas run or a foreground atlas serve; exit that instead", rf.PID)
 	}
 	if err := syscall.Kill(rf.PID, syscall.SIGTERM); err != nil {
 		return err

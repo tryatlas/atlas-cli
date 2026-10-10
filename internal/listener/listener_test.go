@@ -3,87 +3,104 @@ package listener
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	"github.com/tryatlas/atlas-cli/internal/memory/server"
 )
 
-func TestHookPromptIsTheRecordedPrompt(t *testing.T) {
+type syncer struct{ forced, retried int }
+
+func (s *syncer) Force() { s.forced++ }
+func (s *syncer) RetryFailed(context.Context) (int64, error) {
+	s.retried++
+	return 3, nil
+}
+
+func start(t *testing.T, opt Options) *Listener {
+	t.Helper()
 	tmp, _ := os.MkdirTemp("/tmp", "atlr") // short path: the socket name must fit
-	defer os.RemoveAll(tmp)
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
 	t.Setenv("XDG_RUNTIME_DIR", tmp)
 	root := filepath.Join(tmp, "w")
 	_ = os.MkdirAll(root, 0o755)
 	_ = exec.Command("git", "-C", root, "init", "-q").Run()
 	root, _ = filepath.EvalSymlinks(root)
-	st, _ := store.Open(root, true)
-	defer st.Close()
-	_ = st.PutBinding(context.Background(), store.Binding{WorkspaceID: root, Root: root, Mode: store.ModeLocal, Enabled: true}, time.Now())
-
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","model":"m","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
-	}))
-	defer up.Close()
-	u, _ := url.Parse(up.URL)
-	l, err := Start(root, "test", Options{Recorder: record.New(st, root), AnthropicUpstream: u})
+	l, err := Start(root, "test", opt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = l.Stop() }()
-	if rf := ReadRunFile(root); rf == nil || rf.Port != l.Port || rf.Socket != l.Socket {
+	t.Cleanup(func() { _ = l.Stop() })
+	return l
+}
+
+func TestRunFileAndBearerOnlyMCP(t *testing.T) {
+	l := start(t, Options{})
+	if rf := ReadRunFile(l.Root); rf == nil || rf.Port != l.Port || rf.Socket != l.Socket || rf.Daemon {
 		t.Fatalf("run file %+v", rf)
 	}
-
-	sock := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", l.Socket)
-	}}}
-	sid := "4b7a3c2e-1f0d-4e5a-9b8c-7d6e5f4a3b2c"
-	for _, ev := range []HookEvent{
-		{Agent: "claude", Event: "session-start", SessionID: sid, Cwd: root},
-		{Agent: "claude", Event: "user-prompt-submit", SessionID: sid, Cwd: root, Prompt: "Exactly what I typed"},
-	} {
-		b, _ := json.Marshal(ev)
-		resp, err := sock.Post("http://atlas/hook", "application/json", bytes.NewReader(b))
-		if err != nil || resp.StatusCode != http.StatusNoContent {
-			t.Fatalf("hook: %v %v", resp, err)
-		}
-		_ = resp.Body.Close()
-	}
-	body := `{"model":"m","tools":[{"name":"Read"}],"metadata":{"user_id":"user_x_session_` + sid + `"},` +
-		`"messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>r</system-reminder>Exactly what I typed"}]}]}`
-	resp, err := http.Post("http://127.0.0.1:"+itoa(l.Port)+"/proxy/anthropic/v1/messages", "application/json", strings.NewReader(body))
+	init := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`
+	resp, err := http.Post(l.MCPURL(), "application/json", strings.NewReader(init))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-	var got string
-	for i := 0; i < 50; i++ {
-		var s sql.NullString
-		_ = st.DB().QueryRow(`SELECT body FROM agent_message WHERE role = 'user'`).Scan(&s)
-		if got = s.String; got != "" {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no bearer: %d", resp.StatusCode)
 	}
-	if got != "Exactly what I typed" {
-		t.Fatalf("prompt %q", got)
+	tok := l.Tokens.Mint(server.Grant{SessionID: "s", Agent: "test-agent", Cwd: l.Root})
+	req, _ := http.NewRequest(http.MethodPost, l.MCPURL(), strings.NewReader(init))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !bytes.Contains(b, []byte(`"serverInfo"`)) {
+		t.Fatalf("%d %s", resp.StatusCode, b)
+	}
+	if err := l.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if ReadRunFile(l.Root) != nil {
+		t.Fatal("run file left behind")
 	}
 }
 
-func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
+func TestSyncControlOverTheSocket(t *testing.T) {
+	s := &syncer{}
+	l := start(t, Options{Sync: s, Daemon: true})
+	if rf := ReadRunFile(l.Root); !rf.Daemon {
+		t.Fatal("daemon flag")
+	}
+	c := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", l.Socket)
+	}}}
+	resp, err := c.Post("http://atlas/sync", "application/json", strings.NewReader(`{"retry":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ans SyncAnswer
+	_ = json.NewDecoder(resp.Body).Decode(&ans)
+	_ = resp.Body.Close()
+	if ans.Requeued != 3 || s.retried != 1 || s.forced != 1 {
+		t.Fatalf("%+v %+v", ans, s)
+	}
+	resp, err = c.Get("http://atlas/hook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("socket serves only /sync: %d", resp.StatusCode)
+	}
+}

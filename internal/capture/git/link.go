@@ -18,7 +18,7 @@ import (
 
 // The walk that links captured sessions to the commits that carried their
 // work (SPEC §6.6, evidence-capture.md §6.2–6.3). This is the watcher-free
-// version: it runs on atlas shell exit and on atlas capture link. Rewrites
+// version: it runs when a listener stops and on atlas capture link. Rewrites
 // (relinking after a rebase, orphaning) are not implemented yet; the desktop
 // reconciles them when it opens the folder.
 

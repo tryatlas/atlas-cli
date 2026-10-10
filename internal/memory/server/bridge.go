@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -178,11 +177,11 @@ func writeError(w *bufio.Writer, msg []byte, err error) error {
 
 // ── HTTP forwarder ───────────────────────────────────────────────────────────
 
-// HTTPForwarder posts to a memory server over HTTP (TCP loopback or a Unix
-// socket). It never uses a proxy.
+// HTTPForwarder posts to a loopback memory server over HTTP. It never uses
+// a proxy.
 type HTTPForwarder struct {
 	URL     string
-	Headers http.Header // Authorization, or the X-Atlas-* grant headers on the socket
+	Headers http.Header // Authorization: Bearer <ATLAS_MCP_TOKEN>
 	Client  *http.Client
 }
 
@@ -217,23 +216,6 @@ func NewTCPForwarder(rawURL, token string) (*HTTPForwarder, error) {
 	}
 	return &HTTPForwarder{URL: rawURL, Headers: h,
 		Client: &http.Client{Transport: &http.Transport{Proxy: nil}}}, nil
-}
-
-// NewSocketForwarder targets the listener's Unix socket with the grant
-// headers and the bridge's ancestor pids (to join it to the agent's session).
-func NewSocketForwarder(socket string, g Grant, pids string) *HTTPForwarder {
-	h := http.Header{}
-	h.Set(HeaderAgent, g.Agent)
-	h.Set(HeaderCwd, g.Cwd)
-	h.Set(HeaderSession, g.SessionID)
-	if pids != "" {
-		h.Set(HeaderPIDs, pids)
-	}
-	tr := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		var d net.Dialer
-		return d.DialContext(ctx, "unix", socket)
-	}}
-	return &HTTPForwarder{URL: "http://atlas/mcp", Headers: h, Client: &http.Client{Transport: tr}}
 }
 
 // Post sends one message.
@@ -292,8 +274,8 @@ func (f *HTTPForwarder) Close(ctx context.Context, sessionID string) {
 
 // ── In-process forwarder ─────────────────────────────────────────────────────
 
-// LocalForwarder serves the session in this process when no listener runs,
-// so memory works outside atlas shell.
+// LocalForwarder serves a session in this process (tests, and any caller
+// that hosts the server itself).
 type LocalForwarder struct{ h *HTTPHandler }
 
 // NewLocalForwarder wraps a server for one grant.

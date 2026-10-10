@@ -560,3 +560,31 @@ Not verified: that the session shows in the cloud Workspace and in a
 teammate's Timeline. That needs the web app or a second account (the user).
 Open: the evidence does not say how the desktop treats a row that is
 missing from a non-empty `results` list; the CLI counts it as accepted.
+
+## Step 0 (ADR-0009) — commit and park
+
+- Committed Phases 6b and 7a as `6e8a73f` on `feat/cli-foundation`
+  (graphify-out/ ignored); branch `parked/proxy-path` points at it.
+- Removed from `feat/cli-foundation`: `internal/proxy`,
+  `internal/agents/ambient`, `internal/procs`; the `atlas shell`, `atlas
+  env`, `atlas hook …` and `atlas statusline` commands; the hook, status
+  line and MCP-config writers behind `memory enable` / `capture enable`
+  (they now flip only the gates and write no agent file); the memory
+  server's socket auth (`SocketAuth`, the `X-Atlas-*` grant headers), the
+  bridge-to-hook PID join and `Server.Rename`; the `andybalholm/brotli`
+  dependency.
+- `atlas mcp-bridge <url>` is now only the desktop's bridge (ADR-0019): a
+  loopback URL with the bearer in `ATLAS_MCP_TOKEN`.
+- The listener serves `/mcp` on `127.0.0.1:<port>` behind per-session
+  bearers (`Listener.Tokens`, `MCPURL()`), and keeps the owner-only Unix
+  socket with the peer-uid check **for one path only, `/sync`**: `atlas
+  capture sync|retry` use it to drive the drain of a running listener. The
+  socket's `/mcp` and `/hook` are gone.
+- `atlas serve` (and `--daemon/--stop`) runs the listener with the store
+  lock and the drain; no proxy.
+- `docs/acceptance/desktop.md` is marked as belonging to the parked path.
+
+Tests and lint green. Command surface now: login, logout, whoami, org
+list|use|create, init, memory enable|disable|verify|export|import, capture
+enable|disable|sync|retry|link, serve, status, run (stub), mcp-bridge
+(hidden).

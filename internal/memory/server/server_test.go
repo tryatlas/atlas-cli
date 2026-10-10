@@ -248,37 +248,28 @@ func TestSharingGateOff(t *testing.T) {
 	}
 }
 
-func TestUnixSocketAndReplay(t *testing.T) {
+func TestBridgeReplaysInitializeAfterARestart(t *testing.T) {
 	dir := repo(t)
-	sockDir, _ := os.MkdirTemp("/tmp", "atl")
-	defer os.RemoveAll(sockDir)
-	sock := filepath.Join(sockDir, "s", "m.sock")
-	l, err := ListenUnix(sock)
+	tokens := NewTokens()
+	srv := newServer()
+	defer srv.Close()
+	h := NewHTTPHandler(srv, tokens.Auth)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	f, err := NewTCPForwarder(ts.URL, tokens.Mint(Grant{SessionID: "s-x", Agent: "gemini", Cwd: dir}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := newServer()
-	defer srv.Close()
-	h := NewHTTPHandler(srv, SocketAuth)
-	hs := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
-	go func() { _ = hs.Serve(l) }()
-	defer hs.Close()
-	if info, _ := os.Stat(sock); info.Mode().Perm() != 0o600 {
-		t.Fatalf("socket mode %v", info.Mode().Perm())
-	}
-	if info, _ := os.Stat(filepath.Dir(sock)); info.Mode().Perm() != 0o700 {
-		t.Fatalf("socket dir mode %v", info.Mode().Perm())
-	}
-	c := startBridge(t, NewSocketForwarder(sock, Grant{SessionID: "s-x", Agent: "gemini", Cwd: dir}, ""))
+	c := startBridge(t, f)
 	handshake(c)
-	if out, e := c.tool("memory_remember", map[string]any{"kind": "fact", "content": "Over the socket"}); e != "" || out["outcome"] != "inserted" {
+	if out, e := c.tool("memory_remember", map[string]any{"kind": "fact", "content": "Over loopback"}); e != "" || out["outcome"] != "inserted" {
 		t.Fatalf("%v %s", out, e)
 	}
 	// The listener forgets every MCP session (a restart); the bridge replays initialize.
 	h.mu.Lock()
 	h.sessions = map[string]*mcpSession{}
 	h.mu.Unlock()
-	if out, e := c.tool("memory_search", map[string]any{"query": "socket"}); e != "" || len(out["entries"].([]any)) != 1 {
+	if out, e := c.tool("memory_search", map[string]any{"query": "loopback"}); e != "" || len(out["entries"].([]any)) != 1 {
 		t.Fatalf("after replay: %v %s", out, e)
 	}
 }

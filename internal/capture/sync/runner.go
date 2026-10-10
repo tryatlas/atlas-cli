@@ -34,7 +34,7 @@ func (b *Backoff) Next(retryAfter time.Duration) time.Duration {
 // Reset clears the backoff after a good pass.
 func (b *Backoff) Reset() { b.cur = 0 }
 
-// Runner drains one Project's store in the background of atlas shell and
+// Runner drains one Project's store in the background of atlas run and
 // atlas serve.
 type Runner struct {
 	Client *Client

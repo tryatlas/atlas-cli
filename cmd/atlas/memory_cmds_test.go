@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/tryatlas/atlas-cli/internal/memory/record"
+	"github.com/tryatlas/atlas-cli/internal/memory/server"
 )
 
 func bridgeIn(t *testing.T, msgs ...string) {
@@ -18,14 +20,20 @@ func bridgeIn(t *testing.T, msgs ...string) {
 	t.Cleanup(func() { stdin = old })
 }
 
-func TestMCPBridgeInProcessThenVerifyExportImport(t *testing.T) {
+func TestMCPBridgeThenVerifyExportImport(t *testing.T) {
 	root := gitRepo(t)
+	srv := server.New("test")
+	defer srv.Close()
+	tokens := server.NewTokens()
+	ts := httptest.NewServer(server.NewHTTPHandler(srv, tokens.Auth))
+	defer ts.Close()
+	t.Setenv("ATLAS_MCP_TOKEN", tokens.Mint(server.Grant{SessionID: server.UUID(), Agent: "codex", Cwd: root}))
 	bridgeIn(t,
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_remember","arguments":{"kind":"decision","content":"Use Postgres for the ledger"}}}`,
 	)
-	code, out, e := runCmd(t, "mcp-bridge", "--project", root, "--agent", "codex")
+	code, out, e := runCmd(t, "mcp-bridge", ts.URL+"/mcp")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, e)
 	}

@@ -28,13 +28,6 @@ var wantCommands = []string{
 	"capture link",
 	"capture retry",
 	"capture sync",
-	"env",
-	"hook claude session-end",
-	"hook claude session-start",
-	"hook claude stop",
-	"hook claude user-prompt-submit",
-	"hook codex notify",
-	"hook gemini session-start",
 	"init",
 	"login",
 	"logout",
@@ -49,9 +42,7 @@ var wantCommands = []string{
 	"org use",
 	"run",
 	"serve",
-	"shell",
 	"status",
-	"statusline claude",
 	"whoami",
 }
 
@@ -77,8 +68,7 @@ var implemented = map[string]bool{
 	"init": true, "status": true, "memory enable": true, "memory disable": true,
 	"capture enable": true, "capture disable": true,
 	"memory verify": true, "memory export": true, "memory import": true, "mcp-bridge": true, "serve": true,
-	"shell": true, "env": true, "capture link": true, "capture sync": true, "capture retry": true, "statusline claude": true, "hook claude session-start": true,
-	"hook claude user-prompt-submit": true, "hook claude stop": true, "hook claude session-end": true,
+	"capture link": true, "capture sync": true, "capture retry": true,
 }
 
 func TestStubsReportNotImplemented(t *testing.T) {

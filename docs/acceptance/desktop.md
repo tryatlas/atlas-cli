@@ -1,5 +1,11 @@
 # Desktop acceptance checklist (Phase 6b)
 
+> **Parked with the proxy path (ADR-0009).** The sessions in
+> `~/Codes/atlas-test-3` were captured by `atlas shell`, which now lives on
+> the `parked/proxy-path` branch. The store-level checks (rows 1–6, 8–10)
+> still describe what a CLI-written store must look like; row 7 needs that
+> branch. The ACP acceptance checklist replaces this one in Phase 7.
+
 Checks that a folder captured by the Atlas CLI opens in the Atlas desktop app
 as if the desktop had recorded it. Run it on `~/Codes/atlas-test-3`, which holds
 three CLI-captured Claude Code sessions (two `claude -p`, one interactive),
