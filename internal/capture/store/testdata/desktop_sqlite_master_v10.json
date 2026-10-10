@@ -1,0 +1,302 @@
+[
+ [
+  "table",
+  "agent_session",
+  "agent_session",
+  "CREATE TABLE agent_session (\n    id                TEXT PRIMARY KEY,\n    workspace_id      TEXT NOT NULL,\n    source            TEXT NOT NULL,\n    native_session_id TEXT NOT NULL,\n    title             TEXT,\n    agent             TEXT,\n    model             TEXT,\n    cwd               TEXT,\n    token_totals      TEXT NOT NULL DEFAULT '{}',\n    summary           TEXT,\n    started_at        TEXT NOT NULL,\n    updated_at        TEXT NOT NULL,\n    needs_attention   INTEGER NOT NULL DEFAULT 0,\n    attention_reason  TEXT,\n    redaction_counts  TEXT NOT NULL DEFAULT '{}',\n    sync_state        TEXT NOT NULL DEFAULT 'local',\n    sync_attempts     INTEGER NOT NULL DEFAULT 0, branch TEXT, last_activity_at TEXT,\n\n    -- Identity. Dedupes a re-import *within* a source; deliberately NOT across\n    -- sources, because Atlas's ACP-hosted agents also write their own JSONL and\n    -- ('acp', id) / ('external_jsonl', id) are both legitimate rows. Skipping\n    -- the cross-source duplicate is the importer's explicit job.\n    UNIQUE (workspace_id, source, native_session_id)\n)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_agent_session_1",
+  "agent_session",
+  null
+ ],
+ [
+  "index",
+  "sqlite_autoindex_agent_session_2",
+  "agent_session",
+  null
+ ],
+ [
+  "table",
+  "agent_message",
+  "agent_message",
+  "CREATE TABLE agent_message (\n    id                TEXT PRIMARY KEY,\n    session_id        TEXT NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,\n    seq               INTEGER NOT NULL,\n    turn_seq          INTEGER NOT NULL,\n    -- The agent's own id for this message, when it has one. This is what makes\n    -- re-processing a turn idempotent rather than duplicating it.\n    native_message_id TEXT,\n    role              TEXT NOT NULL,\n    mode              TEXT NOT NULL,\n    preview           TEXT NOT NULL,\n    body              TEXT,\n    body_ref          TEXT,\n    body_bytes        INTEGER NOT NULL DEFAULT 0,\n    content_hash      TEXT NOT NULL,\n    created_at        TEXT NOT NULL,\n    sync_state        TEXT NOT NULL DEFAULT 'local',\n    sync_attempts     INTEGER NOT NULL DEFAULT 0,\n\n    UNIQUE (session_id, seq)\n)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_agent_message_1",
+  "agent_message",
+  null
+ ],
+ [
+  "index",
+  "sqlite_autoindex_agent_message_2",
+  "agent_message",
+  null
+ ],
+ [
+  "table",
+  "turn",
+  "turn",
+  "CREATE TABLE turn (\n    session_id TEXT NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,\n    turn_seq   INTEGER NOT NULL,\n    state      TEXT NOT NULL,\n    started_at TEXT NOT NULL,\n    ended_at   TEXT,\n    PRIMARY KEY (session_id, turn_seq)\n)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_turn_1",
+  "turn",
+  null
+ ],
+ [
+  "table",
+  "counter",
+  "counter",
+  "CREATE TABLE counter (\n    name  TEXT PRIMARY KEY,\n    value INTEGER NOT NULL\n)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_counter_1",
+  "counter",
+  null
+ ],
+ [
+  "index",
+  "idx_session_outbox",
+  "agent_session",
+  "CREATE INDEX idx_session_outbox\n    ON agent_session (workspace_id, sync_state)"
+ ],
+ [
+  "index",
+  "idx_message_outbox",
+  "agent_message",
+  "CREATE INDEX idx_message_outbox\n    ON agent_message (sync_state, seq)"
+ ],
+ [
+  "index",
+  "idx_message_session_seq",
+  "agent_message",
+  "CREATE INDEX idx_message_session_seq\n    ON agent_message (session_id, seq)"
+ ],
+ [
+  "index",
+  "idx_message_facets",
+  "agent_message",
+  "CREATE INDEX idx_message_facets\n    ON agent_message (session_id, role, mode)"
+ ],
+ [
+  "index",
+  "idx_message_native_id",
+  "agent_message",
+  "CREATE UNIQUE INDEX idx_message_native_id\n    ON agent_message (session_id, native_message_id)\n    WHERE native_message_id IS NOT NULL"
+ ],
+ [
+  "index",
+  "idx_session_started",
+  "agent_session",
+  "CREATE INDEX idx_session_started\n    ON agent_session (workspace_id, started_at)"
+ ],
+ [
+  "table",
+  "tool_call",
+  "tool_call",
+  "CREATE TABLE tool_call (\n    id             TEXT PRIMARY KEY,\n    session_id     TEXT NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,\n    seq            INTEGER NOT NULL,\n    turn_seq       INTEGER NOT NULL,\n    -- The agent's own id for the call \u2014 the idempotency key across the\n    -- first-sighting event and every later update.\n    native_call_id TEXT,\n    -- Derived, not handed over: the wire has no canonical tool name. Grouping by\n    -- the raw wire value would produce one bucket per file the agent touched.\n    tool_name      TEXT NOT NULL,\n    -- The human display string, kept separately so the detail view can show what\n    -- the agent called it without the facet counts inheriting the churn.\n    title          TEXT,\n    kind           TEXT,\n    status         TEXT NOT NULL,\n    locations      TEXT NOT NULL DEFAULT '[]',\n    arguments      TEXT,\n    arguments_ref  TEXT,\n    result         TEXT,\n    result_ref     TEXT,\n    -- A non-UTF8 result (a compiled binary, an image) is stored verbatim and\n    -- skipped by string redaction rather than lossily decoded and corrupted.\n    result_binary  INTEGER NOT NULL DEFAULT 0,\n    created_at     TEXT NOT NULL,\n    sync_state     TEXT NOT NULL DEFAULT 'local',\n    sync_attempts  INTEGER NOT NULL DEFAULT 0,\n\n    UNIQUE (session_id, seq)\n)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_tool_call_1",
+  "tool_call",
+  null
+ ],
+ [
+  "index",
+  "sqlite_autoindex_tool_call_2",
+  "tool_call",
+  null
+ ],
+ [
+  "table",
+  "file_touch",
+  "file_touch",
+  "CREATE TABLE file_touch (\n    id             TEXT PRIMARY KEY,\n    tool_call_id   TEXT NOT NULL REFERENCES tool_call(id) ON DELETE CASCADE,\n    session_id     TEXT NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,\n    turn_seq       INTEGER NOT NULL,\n    seq            INTEGER NOT NULL,\n    -- NFC-normalised, project-relative. macOS hands back NFD while git stores\n    -- NFC, and a byte comparison of the two fails silently.\n    path           TEXT NOT NULL,\n    sha256_after   TEXT,\n    existed_before INTEGER NOT NULL,\n    deleted        INTEGER NOT NULL DEFAULT 0,\n    -- Written outside the Project root. Can never match a commit, and is\n    -- flagged so it is not counted as pending agent work forever.\n    out_of_repo    INTEGER NOT NULL DEFAULT 0,\n    created_at     TEXT NOT NULL\n, consumed_by_commit TEXT, sketch_after TEXT)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_file_touch_1",
+  "file_touch",
+  null
+ ],
+ [
+  "table",
+  "agent_edit",
+  "agent_edit",
+  "CREATE TABLE agent_edit (\n    id           TEXT PRIMARY KEY,\n    tool_call_id TEXT NOT NULL REFERENCES tool_call(id) ON DELETE CASCADE,\n    session_id   TEXT NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,\n    turn_seq     INTEGER NOT NULL,\n    path         TEXT NOT NULL,\n    patch        TEXT,\n    patch_ref    TEXT,\n    created_at   TEXT NOT NULL\n)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_agent_edit_1",
+  "agent_edit",
+  null
+ ],
+ [
+  "index",
+  "idx_tool_call_facets",
+  "tool_call",
+  "CREATE INDEX idx_tool_call_facets\n    ON tool_call (session_id, tool_name)"
+ ],
+ [
+  "index",
+  "idx_tool_call_session_seq",
+  "tool_call",
+  "CREATE INDEX idx_tool_call_session_seq\n    ON tool_call (session_id, seq)"
+ ],
+ [
+  "index",
+  "idx_tool_call_outbox",
+  "tool_call",
+  "CREATE INDEX idx_tool_call_outbox\n    ON tool_call (sync_state, seq)"
+ ],
+ [
+  "index",
+  "idx_tool_call_native_id",
+  "tool_call",
+  "CREATE UNIQUE INDEX idx_tool_call_native_id\n    ON tool_call (session_id, native_call_id)\n    WHERE native_call_id IS NOT NULL"
+ ],
+ [
+  "index",
+  "idx_file_touch_path",
+  "file_touch",
+  "CREATE INDEX idx_file_touch_path\n    ON file_touch (session_id, path)"
+ ],
+ [
+  "index",
+  "idx_file_touch_by_path",
+  "file_touch",
+  "CREATE INDEX idx_file_touch_by_path\n    ON file_touch (path)"
+ ],
+ [
+  "index",
+  "idx_agent_edit_session",
+  "agent_edit",
+  "CREATE INDEX idx_agent_edit_session\n    ON agent_edit (session_id, turn_seq)"
+ ],
+ [
+  "table",
+  "checkpoint",
+  "checkpoint",
+  "CREATE TABLE checkpoint (\n    id              TEXT PRIMARY KEY,\n    session_id      TEXT NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,\n    -- May change: a rewrite re-points this at the new commit carrying the same\n    -- change.\n    commit_sha      TEXT NOT NULL,\n    -- Stable across rebase and amend, because it hashes the diff rather than the\n    -- commit. Null for an empty diff, which never participates in matching.\n    patch_id        TEXT,\n    link_state      TEXT NOT NULL DEFAULT 'linked',\n    -- Empty on a detached HEAD. The timeline's branch filter simply does not\n    -- claim those Checkpoints.\n    branch          TEXT,\n    -- Verbatim from the commit, display-only. This is the identity ON the\n    -- commit, which is a different fact from the Atlas account whose agent ran:\n    -- pairing, rebasing a colleague's branch and bot commits all diverge. There\n    -- is deliberately no mapping from git email to Organisation member \u2014 git\n    -- emails are self-asserted and never verified, so treating one as proof of\n    -- identity would let anyone render commits as a colleague.\n    git_author_name  TEXT,\n    git_author_email TEXT,\n    files_touched   TEXT NOT NULL DEFAULT '[]',\n    insertions      INTEGER NOT NULL DEFAULT 0,\n    deletions       INTEGER NOT NULL DEFAULT 0,\n    -- The agent-versus-human line split. Stays null: this feature captures the\n    -- inputs and does not compute the metric, which is a pure function over\n    -- stored rows and can be backfilled across every existing Checkpoint later.\n    attribution     TEXT,\n    created_at      TEXT NOT NULL,\n    sync_state      TEXT NOT NULL DEFAULT 'local',\n    sync_attempts   INTEGER NOT NULL DEFAULT 0,\n\n    UNIQUE (session_id, commit_sha)\n)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_checkpoint_1",
+  "checkpoint",
+  null
+ ],
+ [
+  "index",
+  "sqlite_autoindex_checkpoint_2",
+  "checkpoint",
+  null
+ ],
+ [
+  "table",
+  "workspace_cursor",
+  "workspace_cursor",
+  "CREATE TABLE workspace_cursor (\n    workspace_id     TEXT PRIMARY KEY,\n    last_seen_commit TEXT,\n    -- Set when the cursor could not be resolved and a bounded re-scan was used\n    -- instead. Surfaces through the capture-health signal, because a Project\n    -- that silently stopped detecting commits is the failure this whole design\n    -- exists to avoid.\n    recovered        INTEGER NOT NULL DEFAULT 0,\n    updated_at       TEXT NOT NULL\n, reconcile_note TEXT)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_workspace_cursor_1",
+  "workspace_cursor",
+  null
+ ],
+ [
+  "index",
+  "idx_checkpoint_commit",
+  "checkpoint",
+  "CREATE INDEX idx_checkpoint_commit\n    ON checkpoint (commit_sha)"
+ ],
+ [
+  "index",
+  "idx_checkpoint_session",
+  "checkpoint",
+  "CREATE INDEX idx_checkpoint_session\n    ON checkpoint (session_id)"
+ ],
+ [
+  "index",
+  "idx_checkpoint_patch",
+  "checkpoint",
+  "CREATE INDEX idx_checkpoint_patch\n    ON checkpoint (patch_id)"
+ ],
+ [
+  "index",
+  "idx_checkpoint_outbox",
+  "checkpoint",
+  "CREATE INDEX idx_checkpoint_outbox\n    ON checkpoint (sync_state)"
+ ],
+ [
+  "table",
+  "binding",
+  "binding",
+  "CREATE TABLE binding (\n    id              INTEGER PRIMARY KEY CHECK (id = 1),\n    workspace_id    TEXT NOT NULL,\n    root            TEXT NOT NULL,\n    mode            TEXT NOT NULL DEFAULT 'local',\n    -- Set once the Project is registered to an Organisation.\n    slug            TEXT,\n    org_id          TEXT,\n    -- Advisory. Null for a non-git Project, or one with no commits yet.\n    root_commit_sha TEXT,\n    -- The grafted boundary of a shallow clone is not the true root, so the\n    -- fingerprint it yields is stored but flagged as not authoritative.\n    fingerprint_is_shallow INTEGER NOT NULL DEFAULT 0,\n    -- Advisory, normalised. Null when there is no remote \u2014 which binds fine.\n    git_url         TEXT,\n    -- Disabling stops new records without deleting existing ones.\n    enabled         INTEGER NOT NULL DEFAULT 1,\n    created_at      TEXT NOT NULL,\n    updated_at      TEXT NOT NULL\n, import_approved INTEGER NOT NULL DEFAULT 0, drain_state TEXT NOT NULL DEFAULT 'ok', remote_workspace_id TEXT)"
+ ],
+ [
+  "table",
+  "import_progress",
+  "import_progress",
+  "CREATE TABLE import_progress (\n    path          TEXT PRIMARY KEY,\n    imported_size INTEGER NOT NULL,\n    updated_at    TEXT NOT NULL\n)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_import_progress_1",
+  "import_progress",
+  null
+ ],
+ [
+  "index",
+  "idx_file_touch_unconsumed",
+  "file_touch",
+  "CREATE INDEX idx_file_touch_unconsumed\n    ON file_touch (session_id, path)\n    WHERE consumed_by_commit IS NULL"
+ ],
+ [
+  "index",
+  "idx_session_activity",
+  "agent_session",
+  "CREATE INDEX idx_session_activity\n    ON agent_session (workspace_id, last_activity_at)"
+ ],
+ [
+  "index",
+  "idx_message_activity",
+  "agent_message",
+  "CREATE INDEX idx_message_activity\n    ON agent_message (session_id, created_at)"
+ ],
+ [
+  "table",
+  "usage_delta",
+  "usage_delta",
+  "CREATE TABLE usage_delta (\n    session_id            TEXT NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,\n    turn_seq              INTEGER NOT NULL,\n    model                 TEXT,\n    recorded_at           TEXT NOT NULL,\n    input_tokens          INTEGER NOT NULL DEFAULT 0,\n    output_tokens         INTEGER NOT NULL DEFAULT 0,\n    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,\n    cache_read_tokens     INTEGER NOT NULL DEFAULT 0,\n    reasoning_tokens      INTEGER NOT NULL DEFAULT 0,\n    PRIMARY KEY (session_id, turn_seq)\n)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_usage_delta_1",
+  "usage_delta",
+  null
+ ],
+ [
+  "table",
+  "usage_cursor",
+  "usage_cursor",
+  "CREATE TABLE usage_cursor (\n    session_id            TEXT PRIMARY KEY REFERENCES agent_session(id) ON DELETE CASCADE,\n    input_tokens          INTEGER NOT NULL DEFAULT 0,\n    output_tokens         INTEGER NOT NULL DEFAULT 0,\n    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,\n    cache_read_tokens     INTEGER NOT NULL DEFAULT 0,\n    reasoning_tokens      INTEGER NOT NULL DEFAULT 0\n)"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_usage_cursor_1",
+  "usage_cursor",
+  null
+ ],
+ [
+  "index",
+  "idx_usage_delta_recorded",
+  "usage_delta",
+  "CREATE INDEX idx_usage_delta_recorded\n    ON usage_delta (recorded_at)"
+ ]
+]
