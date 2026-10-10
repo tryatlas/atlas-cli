@@ -109,12 +109,31 @@ func sharingOn(ctx context.Context, cwd string) bool {
 // SessionStarted records the session in the record (session_start event and
 // sessions row) when sharing is on.
 func (s *Server) SessionStarted(ctx context.Context, g Grant) {
-	if !sharingOn(ctx, g.Cwd) {
+	if g.SessionID == "" || !sharingOn(ctx, g.Cwd) {
 		return
 	}
 	if st, err := s.store(ctx, g.Cwd); err == nil {
 		_ = st.SessionStart(ctx, g.SessionID, g.Agent, s.now())
 	}
+}
+
+// Fold folds a captured event (plan_set, file_changed) into the record when
+// sharing is on for the session's cwd.
+func (s *Server) Fold(ctx context.Context, g Grant, ev record.Event) error {
+	if !sharingOn(ctx, g.Cwd) {
+		return nil
+	}
+	st, err := s.store(ctx, g.Cwd)
+	if err != nil {
+		return err
+	}
+	writeProjectJSON(g.Cwd)
+	ev.Agent, ev.Session = g.Agent, g.SessionID
+	if ev.At == 0 {
+		ev.At = s.now()
+	}
+	_, err = st.Fold(ctx, ev)
+	return err
 }
 
 // SessionEnded records session_end and drops the session's clock.
@@ -123,7 +142,7 @@ func (s *Server) SessionEnded(ctx context.Context, g Grant) {
 	delete(s.clocks, g.SessionID)
 	delete(s.read, g.SessionID)
 	s.mu.Unlock()
-	if !sharingOn(ctx, g.Cwd) {
+	if g.SessionID == "" || !sharingOn(ctx, g.Cwd) {
 		return
 	}
 	if st, err := s.store(ctx, g.Cwd); err == nil {

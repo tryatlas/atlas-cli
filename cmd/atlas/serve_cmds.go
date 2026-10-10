@@ -18,92 +18,14 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tryatlas/atlas-cli/internal/auth"
-	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 	capsync "github.com/tryatlas/atlas-cli/internal/capture/sync"
 	"github.com/tryatlas/atlas-cli/internal/hosts"
+	"github.com/tryatlas/atlas-cli/internal/ingest"
 	"github.com/tryatlas/atlas-cli/internal/listener"
 	"github.com/tryatlas/atlas-cli/internal/project"
+	atlasrun "github.com/tryatlas/atlas-cli/internal/run"
 )
-
-// host is a Project's running listener with everything that needs the
-// writer lock: the capture store and the sync drain. atlas serve runs one;
-// atlas run will run one in-process.
-type host struct {
-	Root     string
-	Listener *listener.Listener
-	Store    *store.Store
-	Sync     *capsync.Runner
-
-	lock   *store.WriterLock
-	cancel context.CancelFunc
-	done   chan struct{}
-}
-
-// syncClient is the drain's HTTP client with the signed-in user's tokens.
-func syncClient() *capsync.Client {
-	var tokens interface {
-		Token(context.Context) (string, error)
-		Invalidate()
-	} = signedOut{}
-	if a, err := auth.New(); err == nil {
-		tokens = a.Tokens()
-	}
-	return capsync.NewClient(hosts.Ingest(), tokens)
-}
-
-// signedOut is the token source when no session file can be opened.
-type signedOut struct{}
-
-func (signedOut) Token(context.Context) (string, error) { return "", auth.ErrSignedOut }
-func (signedOut) Invalidate()                           {}
-
-// startHost takes the writer lock, opens the capture store, and starts the
-// listener and the drain.
-func startHost(root string) (*host, error) {
-	lock, err := store.Lock(root)
-	if errors.Is(err, store.ErrLocked) {
-		return nil, errors.New(lockedHelp)
-	}
-	if err != nil {
-		return nil, err
-	}
-	st, err := store.Open(root, false)
-	if err != nil {
-		_ = lock.Release()
-		return nil, err
-	}
-	runner := capsync.NewRunner(syncClient(), st)
-	l, err := listener.Start(root, version, listener.Options{Sync: runner,
-		Daemon: os.Getenv(daemonEnv) != ""})
-	if err != nil {
-		_ = st.Close()
-		_ = lock.Release()
-		return nil, err
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	h := &host{Root: root, Listener: l, Store: st, Sync: runner, lock: lock, cancel: cancel, done: make(chan struct{})}
-	go func() {
-		runner.Run(ctx)
-		close(h.done)
-	}()
-	return h, nil
-}
-
-// Close links new commits, gives the drain one last pass, and stops.
-func (h *host) Close() (gitlink.Result, error) {
-	h.cancel()
-	<-h.done
-	err := h.Listener.Stop()
-	res, lerr := gitlink.Link(context.Background(), h.Store, h.Root, time.Now)
-	if err == nil {
-		err = lerr
-	}
-	_, _ = capsync.Drain(context.Background(), h.Sync.Client, h.Store, capsync.Budget, time.Now)
-	_ = h.Store.Close()
-	_ = h.lock.Release()
-	return res, err
-}
 
 // ── atlas capture sync / retry ───────────────────────────────────────────────
 
@@ -253,7 +175,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if d, _ := cmd.Flags().GetBool("daemon"); d && os.Getenv(daemonEnv) == "" {
 		return startDaemon(cmd, p.Root)
 	}
-	h, err := startHost(p.Root)
+	h, err := atlasrun.StartHost(p.Root, hostOptions(os.Getenv(daemonEnv) != ""))
 	if err != nil {
 		return err
 	}
@@ -339,3 +261,26 @@ func stopDaemon(out interface{ Write([]byte) (int, error) }, root string) error 
 func alive(pid int) bool {
 	return pid > 0 && syscall.Kill(pid, 0) == nil
 }
+
+// hostOptions are the listener host's settings for this CLI.
+func hostOptions(daemon bool) atlasrun.HostOptions {
+	return atlasrun.HostOptions{Version: version, Ingest: hosts.Ingest(), Tokens: tokenSource(), Daemon: daemon}
+}
+
+// syncClient is the drain's HTTP client with the signed-in user's tokens.
+func syncClient() *capsync.Client { return capsync.NewClient(hosts.Ingest(), tokenSource()) }
+
+// tokenSource is the signed-in user's JWT source, or one that always says
+// signed out.
+func tokenSource() ingest.Tokens {
+	if a, err := newAuth(); err == nil && a != nil {
+		return a.Tokens()
+	}
+	return signedOut{}
+}
+
+// signedOut is the token source when no session file can be opened.
+type signedOut struct{}
+
+func (signedOut) Token(context.Context) (string, error) { return "", auth.ErrSignedOut }
+func (signedOut) Invalidate()                           {}

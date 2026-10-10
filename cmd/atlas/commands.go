@@ -38,6 +38,7 @@ func newRootCmd() *cobra.Command {
 		newServeCmd(),
 		withRun(leaf("status", "Show login, organisation, Project, gates, capture health and agent integrations", cobra.NoArgs), runStatus),
 		newRunCmd(),
+		newAgentsCmd(),
 		newMCPBridgeCmd(),
 	)
 	return root
@@ -125,10 +126,6 @@ func newServeCmd() *cobra.Command {
 	c.Flags().Bool("stop", false, "stop a detached listener")
 	c.MarkFlagsMutuallyExclusive("daemon", "stop")
 	return c
-}
-
-func newRunCmd() *cobra.Command {
-	return leaf("run <agent>", "Drive an ACP agent from the registry headlessly, with full capture", cobra.MaximumNArgs(1))
 }
 
 func newMCPBridgeCmd() *cobra.Command {

@@ -17,12 +17,19 @@ func TestMain(m *testing.M) {
 	newAuth = func() (*auth.Auth, error) { return nil, errors.New("test did not install a fake auth") }
 	interactive = func() bool { return false }
 	_ = os.Setenv("ATLAS_INGEST_URL", "http://127.0.0.1:1") // unreachable unless a test installs a fake
+	data, _ := os.MkdirTemp("", "atlas-data-")              // never the user's agents
+	_ = os.Setenv("XDG_DATA_HOME", data)
 	os.Exit(m.Run())
 }
 
 // wantCommands is the full command surface from SPEC §1.1, §3.7, §4.4, §5.5,
 // §6.7, §7.4–7.6 and §8, plus D13's memory export/import and verify.
 var wantCommands = []string{
+	"agents detect",
+	"agents install",
+	"agents list",
+	"agents logout",
+	"agents uninstall",
 	"capture disable",
 	"capture enable",
 	"capture link",
@@ -68,7 +75,8 @@ var implemented = map[string]bool{
 	"init": true, "status": true, "memory enable": true, "memory disable": true,
 	"capture enable": true, "capture disable": true,
 	"memory verify": true, "memory export": true, "memory import": true, "mcp-bridge": true, "serve": true,
-	"capture link": true, "capture sync": true, "capture retry": true,
+	"capture link": true, "capture sync": true, "capture retry": true, "run": true,
+	"agents detect": true, "agents install": true, "agents list": true, "agents logout": true, "agents uninstall": true,
 }
 
 func TestStubsReportNotImplemented(t *testing.T) {

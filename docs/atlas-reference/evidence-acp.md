@@ -488,7 +488,7 @@ CREATE TABLE session_aliases(alias_id TEXT PRIMARY KEY, owner_session_id TEXT NO
 | codex | reads `CODEX_API_KEY`/`OPENAI_API_KEY`; memories off via `-c memories.*` | `server.rs:326-335`, `:283-292` |
 | codex npx | ~220 MB platform tarball; npm exits 0 when the optional platform package fails → tree verified against `.package-lock.json` | `node.rs:40-44`, `servers.rs:720-736` |
 | OpenCode | no `modes` on the session; mode arrives only as a `category:"mode"` select in `configOptions`, mode changes as `config_option_update`; models grouped by maker | `connection.rs:1497-1510`, `handlers.rs:846-856`, `:1596-1600` |
-| gemini | `SURFACE=atlas` env | `server.rs:337-339` |
+| gemini | `SURFACE=atlas` env | `server.rs:343-345` |
 | cursor | `_meta["terminal-auth"]` with only `command` ("cursor-agent") | `connection.rs:1914-1927` |
 | some agents | report a cancelled turn as `InternalError` "This operation was aborted" / "The user aborted a request" | `connection.rs:1301-1311` |
 | some adapters | `session/request_permission` for a tool call never announced via `tool_call` (bare update) | `thread.rs:1652-1654` |

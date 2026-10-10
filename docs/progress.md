@@ -588,3 +588,123 @@ Tests and lint green. Command surface now: login, logout, whoami, org
 list|use|create, init, memory enable|disable|verify|export|import, capture
 enable|disable|sync|retry|link, serve, status, run (stub), mcp-bridge
 (hidden).
+
+## Phase 7 (first part) — the ACP client, up to the first end-to-end agent
+
+ADR-0010: the JSON-RPC layer is hand-rolled; `coder/acp-go-sdk` v0.13.5 was
+checked (zero deps, Apache-2.0, every method we use exists) and not taken.
+The reasons: its unions are strict where the desktop is tolerant, it closes
+the connection on lines over 10 MiB and on a notification backlog over 1024,
+and it logs raw message lines.
+
+Built (`internal/agents/acp`, `internal/run`, `cmd/atlas`):
+
+- **Registry**: cache-first at `$XDG_DATA_HOME/dev.atlas.ide/external-agents/registry/registry.json`,
+  hourly refresh, a failed refresh keeps the catalogue, entries parsed one
+  at a time (bad ones dropped), platform keys, the binary-vs-npx rule, icon
+  URLs, User-Agent `atlas/<version>`.
+- **Installed map**: `external-agents/installed.json` in Zed's shape (two-space
+  indent, `type` first, empty options omitted, unknown keys round-trip,
+  `extension` read as `registry`, `~/` expanded at launch only).
+- **Managed Node v24.11.0**: SHASUMS256 verification required, liveness via
+  `npm --version`, the exact npm flags, `npm_config_*`/`NODE_ENV` stripped,
+  1800 s / 600 s deadlines with one retry on spawn failure only.
+- **npx installs**: ceiling spec `pkg@0.0.0 - <ver>`, `.atlas-wanted`, the five
+  install-needed checks (platform optional package verified against
+  `node_modules/.package-lock.json`), `--prefer-online` then
+  `--prefer-offline`, bin resolution.
+- **Binary installs**: the versioned-dir formula, checksum ladder (registry
+  sha256 → GitHub release digest → unverified), accepted/refused suffixes,
+  raw-binary fallback, 2 GiB / 4 GiB / 100 000-entry limits, files 0755,
+  `cmd` containment, old versions removed.
+- **Launch**: piped stdio, `setsid`, `killpg(SIGKILL)` on teardown,
+  `CLAUDECODE` stripped, proxy variables canonicalised with `NO_PROXY`, the
+  desktop's quirk table as data, env precedence process < distribution <
+  extra < (BYOK) < installed-map env.
+- **JSON-RPC**: one serial queue for notifications and responses in wire
+  order, agent requests on their own goroutines, `$/cancel_request` both
+  ways, no line limit, nothing logged.
+- **Protocol**: `initialize` exactly as the desktop sends it, 60 s timeout,
+  250 ms exit grace, 1 s stderr drain, protocolVersion ≥ 1; 120 s for
+  session/new|load|resume|authenticate|set_mode|list; no timeout on
+  prompt; cancel with 5 s grace and the abort-string rule; the
+  authenticate outcome rules; session/new with the `atlas_memory` entry
+  (HTTP + bearer when `mcpCapabilities.http`, else the stdio bridge with
+  `ATLAS_MCP_TOKEN`) and `_meta.claudeCode.options.allowedTools`;
+  `additionalDirectories` only when advertised; modes synthesised from a
+  `category:"mode"` select; `default_mode` applied; load/resume, set_mode,
+  set_config_option, list, delete, close, logout by capability.
+- **Client callbacks**:
+  - `fs/read_text_file` and `fs/write_text_file`, with root containment that
+    canonicalises the deepest existing ancestor;
+  - `terminal/create` (asks first, drops `DYLD_*`/`LD_*`, own process group,
+    UUID ids), plus `output`, `wait_for_exit`, `kill` and `release`;
+  - `session/request_permission` (the option kind is read back from the
+    request; a cancelled turn answers cancelled);
+  - elicitation in `form` and `url` modes.
+  Unknown `sessionUpdate` variants and unknown session ids are dropped.
+- **Recorder for ACP**:
+  - one message per contiguous run of one kind, written at turn end with
+    the first chunk's time;
+  - tool sightings merged by call id;
+  - `diff` content blocks drive write sampling and the patch;
+  - `existed_before` comes from the first non-terminal sighting;
+  - the 60 s shell window;
+  - prompt `usage` per turn, and `usage_update` as gauges;
+  - nothing recorded during a `session/load` replay.
+  `source=acp`, `native_session_id` = the ACP id, `agent` = the registry id.
+- **Memory**:
+  - `session_start` at bind and `session_end` at close (no longer on an MCP
+    DELETE);
+  - `plan` → `plan_set`; completed write tools → `file_changed`;
+  - the token is minted before `session/new` and bound to the id after it;
+    the HTTP handler now reads the grant from the bearer on every request.
+- **Commands**: `atlas agents list|install [--detected]|uninstall [--purge]|detect|logout`,
+  `atlas run <agent> --prompt "…" [--no-tui] [--yes] [--resume <id>]`.
+  Headless permissions: `--yes` allows; on a terminal the user picks;
+  otherwise the first reject option.
+- `atlas serve` and `atlas run` share `internal/run.Host`. When the desktop
+  holds the lock, `atlas run` runs with capture off and says so.
+- Fixture tests: a scripted ACP agent (`acptest`, the test binary re-run as a
+  child) covers initialize, session/new/load, prompt, permission (allow and
+  reject), fs/write_text_file, plan, usage_update, an unknown variant, and
+  AuthRequired → terminal login → authenticate "not implemented" → retry.
+
+Verified live, `claude-acp` 0.89.1 (npx), `~/Codes/atlas-test-cloud`:
+
+- First run downloaded Node v24.11.0 (checksum verified) and installed the
+  package, then wrote `acp-notes.md` with **Write**: session, prompt and
+  reply, tool call, file touch (`existed_before=0`, hash, sketch), patch,
+  usage per turn plus context gauges (31 370 / 1 000 000), turn completed;
+  every row `sent` to the cloud Project.
+- A **Bash** edit was captured as a call. It has no file touch, because the
+  file was already untracked before the command ran; the desktop's rule
+  gives the same.
+- An **Edit**, then the agent's own `atlas_memory` `memory_remember`, ran with
+  no permission prompt, so `allowedTools` worked. Memory holds
+  `file_changed acp-notes.md` and the decision under the ACP session id.
+- Commit `a38e248` + `atlas capture link`: the checkpoint linked to the
+  Write session and was `sent`.
+- Two bugs found and fixed live:
+  - `file_changed` was missing because Claude's completed update carries
+    only the status; sightings are now merged.
+  - The MCP connection initialised before the token was bound, which logged
+    an empty-id `session_start`; the grant is now read per request and
+    empty ids are skipped.
+
+Reference notes:
+
+- evidence-acp.md §3.1 has the desktop send `clientCapabilities.session`.
+  The acp-go-sdk schema (spec 0.13.5) has no such key, and the CLI sends it.
+- evidence-acp.md §3.9 names `session/request_elicitation` and
+  `session/complete_elicitation`; spec 0.13.5 names `elicitation/create` and
+  `elicitation/complete`. Both are served.
+- The schema describes prompt `usage` as "across all turns"; evidence §6 says
+  claude-agent-acp's is per turn. The CLI follows the evidence: claude
+  totals match per-turn sums.
+- The quirk table (§2.4) is keyed `claude-code`, `codex` and `gemini`, but
+  today's registry ids are `claude-acp`, `codex-acp` and `gemini`. Only the
+  Gemini row can match. It is copied verbatim.
+
+Not yet verified: the desktop checklist (`docs/acceptance/acp.md`). Not built
+yet: the chat TUI (Phase 8). `atlas run` without `--prompt` says so.

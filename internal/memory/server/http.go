@@ -49,13 +49,11 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 	case http.MethodDelete:
+		// Ends the MCP connection only: session_start/session_end belong to
+		// the agent session's host (atlas run), not to one MCP connection.
 		h.mu.Lock()
-		s := h.sessions[r.Header.Get("Mcp-Session-Id")]
 		delete(h.sessions, r.Header.Get("Mcp-Session-Id"))
 		h.mu.Unlock()
-		if s != nil {
-			h.Server.SessionEnded(r.Context(), s.grant)
-		}
 		w.WriteHeader(http.StatusOK)
 		return
 	default:
@@ -88,7 +86,8 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unknown MCP session", http.StatusNotFound)
 			return
 		}
-		grant = s.grant
+		// The grant is read from the bearer on every request: a token
+		// minted before session/new is bound to the session id afterwards.
 	}
 	resp, negotiated := h.Server.Handle(r.Context(), grant, body)
 	if negotiated != "" {
@@ -125,6 +124,16 @@ func (t *Tokens) Mint(g Grant) string {
 	t.grants[tok] = g
 	t.mu.Unlock()
 	return tok
+}
+
+// Bind gives a minted token its session once the agent has answered
+// session/new (the token is minted before, desktop tokens.rs).
+func (t *Tokens) Bind(tok string, g Grant) {
+	t.mu.Lock()
+	if _, ok := t.grants[tok]; ok {
+		t.grants[tok] = g
+	}
+	t.mu.Unlock()
 }
 
 // Revoke drops a token.

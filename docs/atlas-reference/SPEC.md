@@ -58,7 +58,7 @@ atlas status                                 # who, where, what is on, health
 | D7 | **Parked by D20.** The ambient integration was to be per-agent adapters behind one small interface, and the new repo records this as its own ADR. | It knowingly breaks the desktop's "no agent gets special treatment" rule (ADR-0002), which still applies to the ACP path. |
 | D8 | **`atlas run <agent>` over ACP is the primary path** (see D20), using the same registry as the desktop Marketplace, no hardcoded agent list, capability discovered at `initialize`. It also serves headless automation (CI, cron) with `--prompt` and no TUI. | ADR-0002: agents come from the registry, capability is discovered at `initialize`. |
 | D9 | **Parked by D20.** Env vars were to reach the user's shell through `atlas shell` (a subshell) with `eval "$(atlas env)"` as the scripting fallback. | A process cannot set its parent's environment. |
-| D10 | **Parked by D20** except the server name. Agent-visible status was to be the Claude Code status line + SessionStart banner; MCP server named `atlas` so tool calls render as `atlas - memory_search`. | Users asked to see "Claude using Atlas". |
+| D10 | **Parked by D20.** Agent-visible status was to be the Claude Code status line + SessionStart banner, and a server renamed `atlas`. On the ACP path the server keeps the desktop's name `atlas_memory`, so tool calls render as `atlas_memory - memory_search` in every agent, as they do in the desktop. | Users asked to see "Claude using Atlas". |
 | D11 | **The CLI shares the desktop's on-disk formats** (`.atlas/sessions.db`, `.atlas/memory/memory.sqlite`, the auth session file) rather than inventing its own. | Same folder opened later in the desktop must show the same record. |
 | D12 | **Secrets never persist.** The JWT lives in memory; the proxy never logs an `Authorization` header; every stored text passes the redactor. | Same posture as the desktop. |
 | D13 | **No cross-machine memory sync in v1.** The record stays local per checkout. The one manual bridge is `atlas memory export` / `atlas memory import` in the desktop's Agent Memory Repo line format, committed by a person; imports land as candidates. The CLI never purges, exposes `atlas memory verify` for the chain, and a server-side revision log is a later ADR. CLI ADR-0001. | Nothing exists server-side today (§5.8); the file format and candidate rule already exist in the desktop. |
@@ -497,7 +497,7 @@ history; it does not stop reads.
 
 ### 5.5 The MCP server
 
-- **Name agents see**: the desktop uses `atlas_memory`. The CLI registers it as **`atlas`** in agent config files (D10) but must also accept being addressed as `atlas_memory`; nothing in the record depends on the name.
+- **Name agents see**: `atlas_memory`, the desktop's name, on the `mcpServers` entry. Nothing in the record depends on the name.
 - **Transport**: MCP streamable HTTP at `http://127.0.0.1:<port>/mcp`. Loopback only. Bearer auth: `Authorization: Bearer <token>` on every request, 401 otherwise. Token = two UUIDv4 simple-hex forms concatenated (64 hex chars), one per agent session, carrying `{session_id, agent, cwd}`. For ambient agents the token is minted when the config is written (one per agent per folder, stored only in that agent's config entry) and rotated by `atlas memory enable` again.
 - **stdio bridge** (ADR-0019) for agents without HTTP MCP: `atlas mcp-bridge <url>` with `ATLAS_MCP_TOKEN` in env. It reads one JSON-RPC line from stdin, POSTs it with `Accept: application/json, text/event-stream`, `Content-Type: application/json`, `Mcp-Session-Id` once issued and `MCP-Protocol-Version` (negotiated; not on `initialize`), writes each JSON body or SSE `data:` line to stdout as one line, and replays `initialize` + `notifications/initialized` on a non-JSON-RPC 404. Refuses non-loopback or userinfo URLs; ignores proxies. The token never appears in argv.
 - `tools/list` carries `ttlMs = 3600000`, `cacheScope = "private"`.
@@ -1143,7 +1143,7 @@ API-key Codex sessions is derived (§7.2).
 
 - **Claude Code status line**: `.claude/settings.json` → `{"statusLine":{"type":"command","command":"atlas statusline claude"}}`. The command receives JSON on stdin (`session_id`, `cwd`, `model`, `workspace`, `cost`, …; read every field defensively) and prints one line, e.g. `Atlas · acme/backend · memory on · capture on`. If a status line already exists, wrap it: the CLI's command runs the original and appends. Scope: project settings so it is per-folder.
 - **SessionStart banner** as in §7.4.
-- **Server name `atlas`** so tool calls render `atlas - memory_search`.
+- **Server name** was to be `atlas`; parked. The ACP path uses the desktop's `atlas_memory`.
 - Gemini CLI / Codex: no status line; the MCP server name is the visible signal. Verify current docs before promising more.
 
 ### 7.6 `atlas shell` and `atlas env`

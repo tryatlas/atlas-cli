@@ -290,11 +290,30 @@ func ACPKind(name string) string {
 
 var pathKeys = []string{"file_path", "path", "filePath", "target_file", "file", "notebook_path"}
 
-// WritePaths are the files a call wrote: every location, else the first of
-// file_path, path, filePath, target_file, file, notebook_path.
-func WritePaths(args json.RawMessage, locations []string) []string {
+// Diff is an ACP diff content block.
+type Diff struct {
+	Path    string
+	OldText *string
+	NewText string
+}
+
+// WritePaths are the files a call wrote: every location, else every diff
+// block's path, else the first of file_path, path, filePath, target_file,
+// file, notebook_path.
+func WritePaths(args json.RawMessage, locations []string, diffs ...Diff) []string {
 	if len(locations) > 0 {
 		return locations
+	}
+	if len(diffs) > 0 {
+		var out []string
+		for _, d := range diffs {
+			if d.Path != "" {
+				out = append(out, d.Path)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
 	}
 	var a map[string]json.RawMessage
 	_ = json.Unmarshal(args, &a)
@@ -308,8 +327,50 @@ func WritePaths(args json.RawMessage, locations []string) []string {
 }
 
 // EditPatch is arguments.patch or .diff verbatim, else a synthesised
-// "--- before / +++ after" from the old and new strings.
-func EditPatch(args json.RawMessage) string {
+// "--- before / +++ after" from the old and new strings in the arguments,
+// else from the diff block for the target path (a lone block when there is
+// no target). Halves are never spliced across sources.
+func EditPatch(args json.RawMessage, target string, diffs ...Diff) string {
+	if p := argsPatch(args); p != "" {
+		return p
+	}
+	var pick *Diff
+	for i := range diffs {
+		if target != "" && diffs[i].Path == target {
+			pick = &diffs[i]
+			break
+		}
+	}
+	if pick == nil && len(diffs) == 1 && target == "" {
+		pick = &diffs[0]
+	}
+	if pick == nil {
+		return ""
+	}
+	old := ""
+	if pick.OldText != nil {
+		old = *pick.OldText
+	}
+	return synth(old, pick.OldText != nil, pick.NewText, true)
+}
+
+func synth(oldS string, hasOld bool, newS string, hasNew bool) string {
+	var b strings.Builder
+	b.WriteString("--- before\n+++ after")
+	if hasOld && oldS != "" {
+		for _, l := range strings.Split(oldS, "\n") {
+			b.WriteString("\n-" + l)
+		}
+	}
+	if hasNew && newS != "" {
+		for _, l := range strings.Split(newS, "\n") {
+			b.WriteString("\n+" + l)
+		}
+	}
+	return b.String()
+}
+
+func argsPatch(args json.RawMessage) string {
 	var a map[string]json.RawMessage
 	_ = json.Unmarshal(args, &a)
 	str := func(keys ...string) (string, bool) {
@@ -329,19 +390,7 @@ func EditPatch(args json.RawMessage) string {
 	if !hasOld && !hasNew {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString("--- before\n+++ after")
-	if hasOld && oldS != "" {
-		for _, l := range strings.Split(oldS, "\n") {
-			b.WriteString("\n-" + l)
-		}
-	}
-	if hasNew && newS != "" {
-		for _, l := range strings.Split(newS, "\n") {
-			b.WriteString("\n+" + l)
-		}
-	}
-	return b.String()
+	return synth(oldS, hasOld, newS, hasNew)
 }
 
 // ProjectPath makes p project-relative with "/" and lexically collapsed

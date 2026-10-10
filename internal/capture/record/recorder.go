@@ -43,10 +43,22 @@ type live struct {
 	model   string
 	usage   store.TokenTotals
 	seeded  bool
-	anchor  map[string]bool // git status paths at the last anchor
-	touched map[string]bool // native call ids whose writes were sampled
-	calls   map[string]Tool // what earlier sightings said about each call
+	anchor  map[string]bool            // git status paths at the last anchor
+	touched map[string]bool            // native call ids whose writes were sampled
+	calls   map[string]Tool            // what earlier sightings said about each call
+	pre     map[string]map[string]bool // call → path → existed at the first non-terminal sighting
+	windows map[string]shellWindow     // call → git status before a running shell call
 }
+
+// shellWindow is a Bash-shaped call's "before" snapshot.
+type shellWindow struct {
+	before map[string]bool
+	at     time.Time
+}
+
+// ShellWindowLimit drops a shell window older than this (evidence-capture.md
+// §4.11).
+const ShellWindowLimit = 60 * time.Second
 
 // New returns a recorder for an open store.
 func New(st *store.Store, root string) *Recorder {
@@ -91,7 +103,8 @@ func (r *Recorder) session(ctx context.Context, s Session) (*live, error) {
 		if err != nil {
 			return nil, err
 		}
-		l = &live{id: id, turn: turn, touched: map[string]bool{}, calls: map[string]Tool{}}
+		l = &live{id: id, turn: turn, touched: map[string]bool{}, calls: map[string]Tool{},
+			pre: map[string]map[string]bool{}, windows: map[string]shellWindow{}}
 		r.sessions[k] = l
 	}
 	if s.Model != "" {
@@ -207,6 +220,7 @@ type Tool struct {
 	Result    *string
 	Binary    []byte
 	Locations []string
+	Diffs     []Diff // ACP diff content blocks
 }
 
 // ToolCall upserts the call; on its first completed sighting it samples the
@@ -239,8 +253,12 @@ func (r *Recorder) ToolCall(ctx context.Context, s Session, t Tool) error {
 		if len(t.Locations) == 0 {
 			t.Locations = prev.Locations
 		}
+		if len(t.Diffs) == 0 {
+			t.Diffs = prev.Diffs
+		}
 	}
-	l.calls[t.NativeID] = Tool{Name: t.Name, Title: t.Title, Kind: t.Kind, Arguments: t.Arguments, Locations: t.Locations}
+	_, seen := l.calls[t.NativeID]
+	l.calls[t.NativeID] = Tool{Name: t.Name, Title: t.Title, Kind: t.Kind, Arguments: t.Arguments, Locations: t.Locations, Diffs: t.Diffs}
 	name := CanonicalToolName(t.Name, t.Title, t.Kind, t.Arguments)
 	kind := t.Kind
 	if kind == "" {
@@ -276,6 +294,30 @@ func (r *Recorder) ToolCall(ctx context.Context, s Session, t Tool) error {
 		locs = string(b)
 	}
 	now := r.Now()
+	terminal := t.Status == "completed" || t.Status == "failed"
+	edits := WritesFiles(name) || len(t.Diffs) > 0
+	if !seen && !terminal {
+		// First, non-terminal sighting: what existed before the write, and
+		// the shell window's "before" (evidence-capture.md §4.10–4.11).
+		if edits {
+			pre := map[string]bool{}
+			for _, p := range WritePaths(t.Arguments, t.Locations, t.Diffs...) {
+				rel, out := ProjectPath(r.Root, p)
+				abs := rel
+				if !out {
+					abs = filepath.Join(r.Root, filepath.FromSlash(rel))
+				}
+				_, err := os.Stat(abs)
+				pre[rel] = err == nil
+			}
+			l.pre[t.NativeID] = pre
+		}
+		if name == "Bash" {
+			if before := gitStatus(r.Root); before != nil {
+				l.windows[t.NativeID] = shellWindow{before: before, at: now}
+			}
+		}
+	}
 	id, _, err := r.Store.UpsertToolCall(ctx, store.ToolCall{SessionID: l.id, TurnSeq: l.turn, NativeID: t.NativeID,
 		ToolName: name, Title: opt(title), Kind: opt(kind), Status: t.Status, Locations: locs,
 		Arguments: args, Result: result, ResultBinary: t.Binary}, now)
@@ -290,26 +332,67 @@ func (r *Recorder) ToolCall(ctx context.Context, s Session, t Tool) error {
 	}
 	l.touched[t.NativeID] = true
 	switch {
-	case WritesFiles(name):
-		return r.sampleWrites(ctx, l, id, WritePaths(t.Arguments, t.Locations), t.Arguments, now)
+	case edits:
+		return r.sampleWrites(ctx, l, id, t.NativeID, WritePaths(t.Arguments, t.Locations, t.Diffs...), t.Arguments, t.Diffs, now)
 	case name == "Bash":
+		if w, ok := l.windows[t.NativeID]; ok {
+			delete(l.windows, t.NativeID)
+			return r.sampleWindow(ctx, l, id, w, now)
+		}
 		return r.sampleShell(ctx, l, id, now)
+	}
+	return nil
+}
+
+// sampleWindow records after − before for a shell call first seen running;
+// a window older than a minute records nothing.
+func (r *Recorder) sampleWindow(ctx context.Context, l *live, callID string, w shellWindow, now time.Time) error {
+	if now.Sub(w.at) > ShellWindowLimit {
+		return nil
+	}
+	after := gitStatus(r.Root)
+	inHead := headFiles(r.Root)
+	for p := range after {
+		if w.before[p] {
+			continue
+		}
+		ft := store.FileTouch{ToolCallID: callID, SessionID: l.id, TurnSeq: l.turn, Path: p, ExistedBefore: inHead[p]}
+		if data, err := os.ReadFile(filepath.Join(r.Root, filepath.FromSlash(p))); err == nil {
+			h := store.SHA256Hex(data)
+			ft.SHA256After, ft.SketchAfter = &h, Sketch(data)
+		} else {
+			ft.Deleted = true
+		}
+		if err := r.Store.AddFileTouch(ctx, ft, now); err != nil {
+			return err
+		}
+	}
+	if l.anchor != nil {
+		for p := range after {
+			l.anchor[p] = true
+		}
 	}
 	return nil
 }
 
 // sampleWrites reads each written file now: sha256, sketch, deleted when the
 // read fails; existed_before from HEAD.
-func (r *Recorder) sampleWrites(ctx context.Context, l *live, callID string, paths []string, args json.RawMessage, now time.Time) error {
+func (r *Recorder) sampleWrites(ctx context.Context, l *live, callID, nativeID string, paths []string, args json.RawMessage, diffs []Diff, now time.Time) error {
 	inHead := headFiles(r.Root)
+	pre := l.pre[nativeID]
+	delete(l.pre, nativeID)
 	for i, p := range paths {
 		rel, out := ProjectPath(r.Root, p)
 		abs := rel
 		if !out {
 			abs = filepath.Join(r.Root, filepath.FromSlash(rel))
 		}
+		existed := !out && inHead[rel]
+		if v, ok := pre[rel]; ok {
+			existed = v
+		}
 		ft := store.FileTouch{ToolCallID: callID, SessionID: l.id, TurnSeq: l.turn, Path: rel, OutOfRepo: out,
-			ExistedBefore: !out && inHead[rel]}
+			ExistedBefore: existed}
 		if data, err := os.ReadFile(abs); err == nil { //nolint:gosec // G304: a path the agent wrote
 			h := store.SHA256Hex(data)
 			ft.SHA256After, ft.SketchAfter = &h, Sketch(data)
@@ -324,7 +407,7 @@ func (r *Recorder) sampleWrites(ctx context.Context, l *live, callID string, pat
 			l.anchor[rel] = true
 		}
 		if i == 0 {
-			if patch := EditPatch(args); patch != "" {
+			if patch := EditPatch(args, p, diffs...); patch != "" {
 				red, ok := r.redactAuto(ctx, l, patch)
 				if ok {
 					if err := r.Store.AddAgentEdit(ctx, callID, l.id, l.turn, rel, red, now); err != nil {
@@ -461,4 +544,19 @@ func headFiles(root string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// Gauge records the context gauges (ACP usage_update: used, size) without
+// touching the token counts.
+func (r *Recorder) Gauge(ctx context.Context, s Session, used, size *int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.enabled(ctx) || (used == nil && size == nil) {
+		return nil
+	}
+	l, err := r.session(ctx, s)
+	if err != nil || l.turn == 0 {
+		return err
+	}
+	return r.Store.RecordUsage(ctx, l.id, l.turn, nil, store.TokenTotals{ContextUsed: used, ContextSize: size}, r.Now())
 }

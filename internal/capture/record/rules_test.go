@@ -111,7 +111,7 @@ func TestEditPatch(t *testing.T) {
 		{`{"file_path":"a"}`, ""},
 	}
 	for _, c := range cases {
-		if got := EditPatch(json.RawMessage(c.args)); got != c.want {
+		if got := EditPatch(json.RawMessage(c.args), ""); got != c.want {
 			t.Errorf("%s\n got %q\nwant %q", c.args, got, c.want)
 		}
 	}
@@ -147,5 +147,28 @@ func TestProjectPath(t *testing.T) {
 		if got != c.want || out != c.out {
 			t.Errorf("%s %s → %s %v", c.root, c.p, got, out)
 		}
+	}
+}
+
+func TestEditPatchFromDiffBlocks(t *testing.T) {
+	old := "a\nb"
+	diffs := []Diff{{Path: "/w/x.go", OldText: &old, NewText: "a\nc"}, {Path: "/w/y.go", NewText: "new"}}
+	if got := EditPatch(nil, "/w/x.go", diffs...); got != "--- before\n+++ after\n-a\n-b\n+a\n+c" {
+		t.Fatalf("%q", got)
+	}
+	if got := EditPatch(nil, "/w/y.go", diffs...); got != "--- before\n+++ after\n+new" {
+		t.Fatalf("new file: %q", got)
+	}
+	if got := EditPatch(nil, "", diffs...); got != "" {
+		t.Fatal("several blocks and no target: nothing")
+	}
+	if got := EditPatch(nil, "", diffs[1]); got != "--- before\n+++ after\n+new" {
+		t.Fatal("a lone block is used without a target")
+	}
+	if got := EditPatch(json.RawMessage(`{"old_string":"q","new_string":"r"}`), "/w/x.go", diffs...); got != "--- before\n+++ after\n-q\n+r" {
+		t.Fatal("arguments win over diff blocks")
+	}
+	if got := WritePaths(nil, nil, diffs...); len(got) != 2 || got[1] != "/w/y.go" {
+		t.Fatalf("%v", got)
 	}
 }

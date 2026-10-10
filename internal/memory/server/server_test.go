@@ -320,3 +320,26 @@ func TestBridgeAnswersWhenServerIsUnreachable(t *testing.T) {
 		t.Fatalf("%v", resp)
 	}
 }
+
+func TestTokenBoundAfterInitializeCarriesTheSession(t *testing.T) {
+	dir := repo(t)
+	tokens := NewTokens()
+	srv := newServer()
+	defer srv.Close()
+	ts := httptest.NewServer(NewHTTPHandler(srv, tokens.Auth))
+	defer ts.Close()
+	tok := tokens.Mint(Grant{Agent: "fake", Cwd: dir}) // minted before session/new answers
+	f, _ := NewTCPForwarder(ts.URL, tok)
+	c := startBridge(t, f)
+	handshake(c) // the agent connects MCP while session/new is in flight
+	tokens.Bind(tok, Grant{SessionID: "acp-1", Agent: "fake", Cwd: dir})
+	if out, e := c.tool("memory_remember", map[string]any{"kind": "fact", "content": "Bound later"}); e != "" || out["outcome"] != "inserted" {
+		t.Fatalf("%v %s", out, e)
+	}
+	st, _ := record.Open(dir, false)
+	defer st.Close()
+	es, _ := st.EntriesBySessions(context.Background(), []string{"acp-1"}, 10)
+	if len(es) != 1 {
+		t.Fatalf("the write carries the bound session id: %d entries", len(es))
+	}
+}
