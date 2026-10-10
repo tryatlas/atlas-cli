@@ -1,0 +1,182 @@
+[
+ [
+  "table",
+  "events",
+  "events",
+  "CREATE TABLE events (\n             seq      INTEGER PRIMARY KEY,\n             ts       INTEGER NOT NULL,\n             kind     TEXT NOT NULL,\n             key      TEXT NOT NULL DEFAULT '',\n             agent    TEXT NOT NULL DEFAULT '',\n             session  TEXT NOT NULL DEFAULT '',\n             payload  TEXT NOT NULL\n         )"
+ ],
+ [
+  "table",
+  "entries",
+  "entries",
+  "CREATE TABLE entries (\n             id            INTEGER PRIMARY KEY AUTOINCREMENT,\n             kind          TEXT NOT NULL,\n             key           TEXT NOT NULL DEFAULT '',\n             content       TEXT NOT NULL,\n             status        TEXT NOT NULL DEFAULT '',\n             source        TEXT NOT NULL DEFAULT '',\n             agent         TEXT NOT NULL DEFAULT '',\n             session       TEXT NOT NULL DEFAULT '',\n             confidence    REAL NOT NULL DEFAULT 1.0,\n             created_at    INTEGER NOT NULL,\n             updated_at    INTEGER NOT NULL,\n             last_used_at  INTEGER,\n             uses          INTEGER NOT NULL DEFAULT 0,\n             content_hash  TEXT NOT NULL,\n             seq           INTEGER\n         , rev INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'active', scope TEXT NOT NULL DEFAULT 'repo', evidence TEXT NOT NULL DEFAULT '[]', changed_by TEXT NOT NULL DEFAULT '')"
+ ],
+ [
+  "table",
+  "sqlite_sequence",
+  "sqlite_sequence",
+  "CREATE TABLE sqlite_sequence(name,seq)"
+ ],
+ [
+  "index",
+  "entries_kind_seq",
+  "entries",
+  "CREATE INDEX entries_kind_seq  ON entries(kind, seq)"
+ ],
+ [
+  "index",
+  "entries_kind_key",
+  "entries",
+  "CREATE INDEX entries_kind_key  ON entries(kind, key)"
+ ],
+ [
+  "index",
+  "entries_kind_hash",
+  "entries",
+  "CREATE INDEX entries_kind_hash ON entries(kind, content_hash)"
+ ],
+ [
+  "table",
+  "sessions",
+  "sessions",
+  "CREATE TABLE sessions (\n             session_id  TEXT PRIMARY KEY,\n             agent       TEXT NOT NULL DEFAULT '',\n             started_at  INTEGER,\n             ended_at    INTEGER\n         )"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_sessions_1",
+  "sessions",
+  null
+ ],
+ [
+  "table",
+  "legacy_imports",
+  "legacy_imports",
+  "CREATE TABLE legacy_imports (\n             source  TEXT PRIMARY KEY,\n             at      INTEGER NOT NULL\n         )"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_legacy_imports_1",
+  "legacy_imports",
+  null
+ ],
+ [
+  "table",
+  "retracted_events",
+  "retracted_events",
+  "CREATE TABLE retracted_events (\n                 seq  INTEGER PRIMARY KEY\n             )"
+ ],
+ [
+  "table",
+  "forgotten",
+  "forgotten",
+  "CREATE TABLE forgotten (\n                 id       INTEGER PRIMARY KEY,\n                 kind     TEXT NOT NULL,\n                 session  TEXT NOT NULL DEFAULT '',\n                 at       INTEGER NOT NULL\n             , seqs TEXT NOT NULL DEFAULT '[]')"
+ ],
+ [
+  "table",
+  "revisions",
+  "revisions",
+  "CREATE TABLE revisions (\n             rev           INTEGER PRIMARY KEY AUTOINCREMENT,\n             entry_id      INTEGER NOT NULL,\n             op            TEXT NOT NULL,\n             kind          TEXT NOT NULL,\n             key           TEXT NOT NULL,\n             content       TEXT NOT NULL,\n             content_hash  TEXT NOT NULL,\n             status        TEXT NOT NULL DEFAULT '',\n             source        TEXT NOT NULL,\n             agent         TEXT NOT NULL,\n             session       TEXT NOT NULL,\n             confidence    REAL NOT NULL,\n             state         TEXT NOT NULL,\n             scope         TEXT NOT NULL DEFAULT 'repo',\n             evidence      TEXT NOT NULL DEFAULT '[]',\n             at            INTEGER NOT NULL,\n             chain         BLOB NOT NULL DEFAULT x''\n         , note TEXT NOT NULL DEFAULT '')"
+ ],
+ [
+  "index",
+  "revisions_entry",
+  "revisions",
+  "CREATE INDEX revisions_entry ON revisions(entry_id, rev)"
+ ],
+ [
+  "table",
+  "entries_fts",
+  "entries_fts",
+  "CREATE VIRTUAL TABLE entries_fts USING fts5(\n             key, content, content='', contentless_delete=1,\n             tokenize='porter unicode61 remove_diacritics 2')"
+ ],
+ [
+  "table",
+  "entries_fts_data",
+  "entries_fts_data",
+  "CREATE TABLE 'entries_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+ ],
+ [
+  "table",
+  "entries_fts_idx",
+  "entries_fts_idx",
+  "CREATE TABLE 'entries_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+ ],
+ [
+  "table",
+  "entries_fts_docsize",
+  "entries_fts_docsize",
+  "CREATE TABLE 'entries_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB, origin INTEGER)"
+ ],
+ [
+  "table",
+  "entries_fts_config",
+  "entries_fts_config",
+  "CREATE TABLE 'entries_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+ ],
+ [
+  "table",
+  "embed_cache",
+  "embed_cache",
+  "CREATE TABLE embed_cache (\n             key    BLOB PRIMARY KEY,\n             model  TEXT NOT NULL,\n             dims   INTEGER NOT NULL,\n             vec    BLOB NOT NULL\n         )"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_embed_cache_1",
+  "embed_cache",
+  null
+ ],
+ [
+  "table",
+  "links",
+  "links",
+  "CREATE TABLE links (\n                 a    INTEGER NOT NULL,\n                 b    INTEGER NOT NULL,\n                 rel  TEXT NOT NULL,\n                 at   INTEGER NOT NULL,\n                 by   TEXT NOT NULL,\n                 PRIMARY KEY (a, b, rel)\n             )"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_links_1",
+  "links",
+  null
+ ],
+ [
+  "table",
+  "episodes",
+  "episodes",
+  "CREATE TABLE episodes (\n                 session     TEXT PRIMARY KEY,\n                 agent       TEXT NOT NULL,\n                 started_at  INTEGER,\n                 ended_at    INTEGER NOT NULL,\n                 note        TEXT NOT NULL\n             )"
+ ],
+ [
+  "index",
+  "sqlite_autoindex_episodes_1",
+  "episodes",
+  null
+ ],
+ [
+  "table",
+  "feedback",
+  "feedback",
+  "CREATE TABLE feedback (\n                 entry_id  INTEGER NOT NULL,\n                 verdict   TEXT NOT NULL,\n                 note      TEXT NOT NULL DEFAULT '',\n                 by        TEXT NOT NULL,\n                 session   TEXT NOT NULL,\n                 at        INTEGER NOT NULL\n             )"
+ ],
+ [
+  "table",
+  "dreams",
+  "dreams",
+  "CREATE TABLE dreams (\n                 id           INTEGER PRIMARY KEY AUTOINCREMENT,\n                 at           INTEGER NOT NULL,\n                 model        TEXT NOT NULL,\n                 episodes_to  INTEGER NOT NULL,\n                 kept         INTEGER NOT NULL,\n                 dropped      TEXT NOT NULL DEFAULT '[]'\n             )"
+ ],
+ [
+  "table",
+  "dream_proposals",
+  "dream_proposals",
+  "CREATE TABLE dream_proposals (\n                 id        INTEGER PRIMARY KEY AUTOINCREMENT,\n                 dream_id  INTEGER NOT NULL,\n                 op        TEXT NOT NULL,\n                 status    TEXT NOT NULL DEFAULT 'pending',\n                 at        INTEGER NOT NULL,\n                 revs      TEXT NOT NULL DEFAULT '[]'\n             )"
+ ],
+ [
+  "table",
+  "dream_attempt",
+  "dream_attempt",
+  "CREATE TABLE dream_attempt (\n                 id  INTEGER PRIMARY KEY CHECK (id = 1),\n                 at  INTEGER NOT NULL\n             )"
+ ],
+ [
+  "index",
+  "revisions_session",
+  "revisions",
+  "CREATE INDEX revisions_session ON revisions(session, at)"
+ ]
+]

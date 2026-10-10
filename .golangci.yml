@@ -31,6 +31,9 @@ linters:
       # Tests may write fixtures with ordinary permissions and use fixed paths.
       - path: _test\.go
         linters: [gosec]
+      # The stores build queries from fixed column lists and "?" placeholders only.
+      - path: internal/(memory/record|capture/store)/
+        text: G202
 
 formatters:
   enable:

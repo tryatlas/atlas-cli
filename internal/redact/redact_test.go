@@ -147,6 +147,8 @@ func TestHoldOuts(t *testing.T) {
 		"refuses `http://127.0.0.1:1@example.com`",
 		"github.com/spf13/cobra v1.10.2 h1:" + rnd(13, 43, base62) + "=",
 		`"integrity": "sha512-` + rnd(14, 86, base62) + `=="`,
+		// Live regression (Phase 6): memory writer URIs in an MCP result.
+		`"sources":["atlas-session:claude-code/5e2c2672-ebd1-4520-8d81-d83a16ead192"]`,
 	}
 	for _, in := range cases {
 		got, err := Flat(in)

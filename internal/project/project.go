@@ -213,3 +213,20 @@ func SetMemorySharing(dir string, enabled bool) error {
 	}
 	return os.Rename(tmp, filepath.Join(d, sharingFile))
 }
+
+// Worktrees lists the repository's other worktrees (git worktree list), canonical.
+func Worktrees(ctx context.Context, dir string) []string {
+	out, err := gitOut(ctx, dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil
+	}
+	var list []string
+	for _, line := range strings.Split(out, "\n") {
+		if p, ok := strings.CutPrefix(line, "worktree "); ok {
+			if c, err := Canonical(p); err == nil {
+				list = append(list, c)
+			}
+		}
+	}
+	return list
+}

@@ -7,7 +7,10 @@ import (
 
 // ── Layer 1: Shannon entropy ────────────────────────────────────────────────
 
-var digestPrefix = regexp.MustCompile(`^sha(?:1|256|384|512)-`)
+var (
+	digestPrefix = regexp.MustCompile(`^sha(?:1|256|384|512)-`)
+	embeddedUUID = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+)
 
 const (
 	entropyMinLen = 20
@@ -66,6 +69,12 @@ func entropySpans(text string) []span {
 // word, identifier, path, hash or id.
 func randomLooking(tok string) bool {
 	core := strings.TrimRight(tok, "=")
+	// A UUID is an identifier, not a secret: judge what is left around it
+	// ("claude-code/4b7a3c2e-…" in a session URI).
+	if embeddedUUID.MatchString(core) {
+		rest := embeddedUUID.ReplaceAllString(core, "")
+		return len(strings.Trim(rest, "/-_+")) >= entropyMinLen && randomLooking(rest)
+	}
 	if len(core) < entropyMinLen || heldOut(core) || pureHex.MatchString(core) || isGitSHA(core) {
 		return false
 	}

@@ -25,13 +25,22 @@ format, does not commit `memory.sqlite`, and does not write the AGENTS.md
 export or the memory-repo mirror (SPEC §5.8).
 
 The one manual bridge (D13, added when the user locked the decision):
-`atlas memory export <file>` writes the active, non-stale durable entries in
+`atlas memory export <dir>` writes the active, non-stale durable entries in
 the desktop's Agent Memory Repo line format (evidence-memory.md §4.2:
 `- <text> [source: …; added: YYYY-MM-DD; atlas-id: <id>; revision: <rev>; code: <path>#L<a>-<b>]`),
 and `atlas memory import <file-or-dir>` reads that format back as
 **candidates** (confidence 0.3, `source = "import:amr"`, metadata kept as the
 revision `note`, deduped by `(kind, content_hash)`), exactly as the desktop's
-AMR import does. A person commits the file; nothing syncs by itself.
+AMR import does. A person commits the files; nothing syncs by itself.
+
+**Amended 2026-10-10 (Phase 5):** export writes a directory, not one file.
+The desktop's AMR import decides an entry's kind from the name of the file
+it is in (`decisions`, `architecture`, `failures`, the preferences section of
+`MEMORY.md`, else fact; evidence-memory.md §4.2). A single exported file
+would come back as all facts. So `export <dir>` writes the mirror layout
+(`MEMORY.md` with the index and preferences, `decisions.md`,
+`architecture.md`, `facts.md`, `failures.md`), and `import` takes that
+directory or any one file in it.
 
 v1 code keeps the door open at no extra cost:
 

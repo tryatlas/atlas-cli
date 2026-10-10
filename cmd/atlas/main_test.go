@@ -74,6 +74,9 @@ var implemented = map[string]bool{
 	"login": true, "logout": true, "whoami": true, "org list": true, "org use": true, "org create": true,
 	"init": true, "status": true, "memory enable": true, "memory disable": true,
 	"capture enable": true, "capture disable": true,
+	"memory verify": true, "memory export": true, "memory import": true, "mcp-bridge": true, "serve": true,
+	"shell": true, "env": true, "statusline claude": true, "hook claude session-start": true,
+	"hook claude user-prompt-submit": true, "hook claude stop": true, "hook claude session-end": true,
 }
 
 func TestStubsReportNotImplemented(t *testing.T) {

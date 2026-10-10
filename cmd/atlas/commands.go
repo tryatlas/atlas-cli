@@ -108,9 +108,9 @@ func newMemoryCmd() *cobra.Command {
 	return group("memory", "Shared memory for agents in this repository",
 		withRun(leaf("enable", "Turn shared memory on and install the agents' MCP entries", cobra.NoArgs), runMemoryGate(true)),
 		withRun(leaf("disable", "Turn shared memory off and remove the agents' MCP entries", cobra.NoArgs), runMemoryGate(false)),
-		leaf("verify", "Verify the memory revision hash chain", cobra.NoArgs),
-		leaf("export <file>", "Export durable memories in the Agent Memory Repo line format", cobra.ExactArgs(1)),
-		leaf("import <file-or-dir>", "Import Agent Memory Repo files as candidate memories", cobra.ExactArgs(1)),
+		withRun(leaf("verify", "Verify the memory revision hash chain", cobra.NoArgs), runMemoryVerify),
+		withRun(leaf("export <dir>", "Export durable memories as an Agent Memory Repo (MEMORY.md and one file per kind)", cobra.ExactArgs(1)), runMemoryExport),
+		withRun(leaf("import <file-or-dir>", "Import Agent Memory Repo files as candidate memories", cobra.ExactArgs(1)), runMemoryImport),
 	)
 }
 
@@ -123,19 +123,19 @@ func newCaptureCmd() *cobra.Command {
 }
 
 func newShellCmd() *cobra.Command {
-	c := leaf("shell", "Start a subshell with the capture proxy and memory server running", cobra.NoArgs)
+	c := withRun(leaf("shell", "Start a subshell with the capture proxy and memory server running", cobra.NoArgs), runShell)
 	c.Flags().String("agent", "all", "agents to route through the proxy: claude, codex, gemini or all")
 	return c
 }
 
 func newEnvCmd() *cobra.Command {
-	c := leaf("env", "Print the environment for a running listener, for eval", cobra.NoArgs)
+	c := withRun(leaf("env", "Print the environment for a running listener, for eval", cobra.NoArgs), runEnv)
 	c.Flags().String("shell", "sh", "output syntax: sh or fish")
 	return c
 }
 
 func newServeCmd() *cobra.Command {
-	c := leaf("serve", "Run the listener (memory server and capture proxy) without a subshell", cobra.NoArgs)
+	c := withRun(leaf("serve", "Run the listener (memory server and capture proxy) without a subshell", cobra.NoArgs), runServe)
 	c.Flags().Bool("daemon", false, "start the listener detached")
 	c.Flags().Bool("stop", false, "stop a detached listener")
 	c.MarkFlagsMutuallyExclusive("daemon", "stop")
@@ -147,7 +147,7 @@ func newRunCmd() *cobra.Command {
 }
 
 func newMCPBridgeCmd() *cobra.Command {
-	c := leaf("mcp-bridge [url]", "Carry MCP over stdio to the local memory server (used by agents)", cobra.MaximumNArgs(1))
+	c := withRun(leaf("mcp-bridge [url]", "Carry MCP over stdio to the local memory server (used by agents)", cobra.MaximumNArgs(1)), runMCPBridge)
 	c.Hidden = true
 	c.Flags().String("project", "", "launch dir whose listener to reach")
 	c.Flags().String("agent", "", "agent id for the memory grant")
@@ -167,7 +167,11 @@ func newHookCmd() *cobra.Command {
 	for _, agent := range []string{"claude", "gemini", "codex"} {
 		events := make([]*cobra.Command, 0, len(hookEvents[agent]))
 		for _, ev := range hookEvents[agent] {
-			events = append(events, leaf(ev, fmt.Sprintf("%s %s hook", agent, ev), cobra.NoArgs))
+			h := leaf(ev, fmt.Sprintf("%s %s hook", agent, ev), cobra.NoArgs)
+			if agent == "claude" {
+				h.RunE = runHook(agent, ev)
+			}
+			events = append(events, h)
 		}
 		c.AddCommand(group(agent, "Hooks for "+agent, events...))
 	}
@@ -176,7 +180,7 @@ func newHookCmd() *cobra.Command {
 
 func newStatuslineCmd() *cobra.Command {
 	c := group("statusline", "Status line commands called by agents",
-		leaf("claude", "Print the Claude Code status line", cobra.NoArgs),
+		withRun(leaf("claude", "Print the Claude Code status line", cobra.NoArgs), runStatusline),
 	)
 	c.Hidden = true
 	return c

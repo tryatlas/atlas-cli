@@ -15,6 +15,9 @@ import (
 // version is set at build time with -ldflags "-X main.version=…".
 var version = "dev"
 
+// stdin is replaced in tests.
+var stdin io.Reader = os.Stdin
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -23,6 +26,7 @@ func main() {
 func run(args []string, stdout, stderr io.Writer) int {
 	root := newRootCmd()
 	root.SetArgs(args)
+	root.SetIn(stdin)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

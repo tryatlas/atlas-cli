@@ -217,3 +217,220 @@ Not verified:
   capture popover.
 - `go.mod` now says `go 1.26.0`, because modernc.org/sqlite v1.60 requires
   it. That still satisfies "Go 1.23+", but CI's Go version moves up with it.
+
+## Phase 5 — shared memory (2026-10-10, awaiting review)
+
+Built:
+
+- `internal/memory/record` (`memory.sqlite` v6):
+  - creates the schema from the desktop's stored DDL (sqlite_master matches
+    byte for byte) and refuses a version other than 6;
+  - `Clean` + flat redaction on every stored text (key, content, event
+    payload strings, feedback notes, import notes);
+  - content hash, and identity by (kind, key) else (kind, hash);
+  - merge, replace, the 5-minute retry rule, and the guard with the exact
+    conflict text;
+  - every write appends a revision sealed into the blake3 chain, sets
+    `entries.rev`, and rewrites the FTS row in the same transaction;
+  - the tool path logs an event for an insert or replace;
+  - forget (tombstone, `retracted_events`, `forgotten`), feedback (useful,
+    promote, wrong, stale), archive;
+  - session start and end; event folds (plan, file_changed and the durable
+    kinds) ready for capture;
+  - FTS5 search with the query builder and rank fusion with the trust and
+    recency priors; changes paging; history; writer URIs; contradicts links;
+  - citations (parse, path rules, hash, re-check as valid, moved, stale or
+    unverifiable);
+  - `VerifyChain`, and Agent Memory Repo export and import (imports land as
+    candidates, `import:amr`, metadata kept in the revision note, deduped).
+- `internal/memory/server`: an MCP JSON-RPC core with the ten tools. Their
+  descriptions and the instructions are generated from SPEC §5.7 and checked
+  identical to `evidence-memory.md` §3.5. Also:
+  - `tools/list` with `ttlMs` and `cacheScope`;
+  - the sharing gate on every call;
+  - the entry JSON shape;
+  - briefing ranking and caps; changes clocks per session;
+  - `memory_why` and provenance from the capture store, read-only;
+  - `project.json` on the first write.
+- Transports:
+  - streamable HTTP (`Mcp-Session-Id`; 404 for an unknown session; DELETE
+    ends it);
+  - bearer tokens in memory (ACP path);
+  - a Unix socket in a 0700 directory, mode 0600, with a peer-uid check
+    (`LOCAL_PEERCRED` on darwin, `SO_PEERCRED` on Linux; pure Go via
+    x/sys/unix).
+- `atlas mcp-bridge`: either the desktop form (`<url>` with
+  `ATLAS_MCP_TOKEN`, loopback only, no proxy) or the ambient form
+  (`--project --agent`). The ambient form uses the listener's socket from
+  `.atlas/cli-run.json`, else serves memory in-process. Each process mints a
+  UUID session id. It writes one message per line, replays `initialize` on a
+  non-JSON-RPC 404, and answers with a JSON-RPC error when the server is
+  unreachable.
+- `internal/listener` + `atlas serve` (foreground; `--daemon`/`--stop` come
+  with the proxy), and `atlas memory verify|export <dir>|import`.
+
+Verified against the desktop:
+
+- **Chain encoding**: recomputed every link of two desktop-written records
+  (46 and 37 revisions; ops fold and insert); all match byte for byte
+  (`TestOracleChains`, run with `ATLAS_ORACLE_MEMORY=…`; the fixtures hold
+  real memories and are not committed).
+- **Content hash**: reproduced all 83 desktop `content_hash` values.
+- **Round trip** (Phase 5 acceptance, `TestOracleRoundTrip`): opening copies
+  of both records and running every read adds no revision and the chain
+  verifies. A CLI write then extends the desktop chain and it still verifies.
+- **Schema**: the CLI's `sqlite_master` equals three desktop stores (two with
+  data, one fresh).
+- **Formats from the data**: `session_start` payload `{}`; `file_changed`
+  payload `{"path","summary"}` with key = path and content = summary; the
+  event `ts`, entry `updated_at` and revision `at` are the same; `project.json`
+  is compact with the 12-hex id of sha256(path).
+- **Live**: `atlas memory verify` on this repo's record (56 revisions, being
+  written by the desktop during this session) and on `~/Codes/atlas` (37):
+  intact. In `~/Codes/atlas-test-2` (a desktop-created record), a remember
+  and a briefing through the in-process bridge, then a search from a second
+  agent through `atlas serve`'s socket; the chain is intact, and the events
+  sit beside the desktop's own `session_start`.
+
+Unclear in the reference; chosen, not verified:
+
+- **Citation hash and JSON keys.** No desktop record on this machine has a
+  cited memory, so "blake3 of the cited lines with whitespace collapsed per
+  line" was implemented as lines joined with `\n`, hex-encoded, stored as
+  `{"path","start_line","end_line","symbol"?,"hash"}`. If the desktop joins
+  or encodes differently, it will mark CLI-written citations stale.
+- **Keyed write onto a keyless entry.** SPEC §5.3 says identity is
+  (kind, key) when a key is given, and also that "a keyless survivor adopts
+  the key". That only happens if a keyed write falls back to a keyless entry
+  with the same hash, so the CLI does that.
+- **Merge revisions** name the writer of the merge (who restated it), not
+  the entry's first writer. No desktop merge revision was available to check.
+- **`ttlMs` / `cacheScope`** are placed at the `tools/list` result level.
+- **`memory_changes` paging**: each kind takes its 8 oldest changes since the
+  clock; the clock then stops before the first one left out. The page is
+  shown newest first.
+- **Rank fusion constant** k = 60. Index lines are cut to 160 characters
+  with "…".
+- **Agent ids**: the desktop's data names Claude over ACP `claude-acp`;
+  SPEC §5.1 says `claude-code`, which the CLI's ambient adapter will use.
+
+Not built yet: agent MCP config writing (`atlas memory enable` writes the
+gate only; the adapters come in Phase 6), the curated pack and recent-session
+extras (omitted as SPEC allows), handoff notes written by the CLI (it serves
+one when an episode exists), and commit evidence.
+
+## Phase 6 — session capture and the Claude Code adapter (2026-10-10, desktop check pending)
+
+Built:
+
+- `internal/capture/store` rows:
+  - session upsert (model and cwd: new value wins; branch: first wins),
+    turns, and `SetTitleIfAbsent`;
+  - messages: once per native id, 2 KiB preview, content hash, body bytes,
+    blobs above 64 KiB (`blobs/<hh>/<sha256>`, tmp + fsync + rename);
+  - tool-call upserts with the COALESCE and `'[]'` rules, binary results as
+    blobs; file touches; agent edits;
+  - the cumulative usage recorder (per-field deltas against `usage_cursor`);
+  - ordered `redaction_counts` merges, the needs-attention flag, and
+    `sent → pending` resync.
+- `internal/capture/record`: machinery stripping, titles, canonical tool
+  names and ACP kinds, write paths, edit patches, project paths, sketches.
+  The Recorder (single writer) handles:
+  - the prompt (turn, title from the flat redaction, user message, git
+    anchor) and assistant runs;
+  - tool calls: earlier sightings fill in later ones; on the first completed
+    sighting, the written files are sampled with `existed_before` from HEAD,
+    and a failed call records no writes. Shell calls are diffed against the
+    anchor, and files a file tool wrote are added to the anchor;
+  - usage as a running sum seeded from the cursor (ADR-0005); turn end;
+    redaction failure → needs_attention.
+- `internal/proxy`:
+  - bytes forwarded untouched with `FlushInterval -1`; headers are passed
+    through and never logged; the upstream is the user's previous
+    `ANTHROPIC_BASE_URL`, else the API;
+  - copies are parsed after forwarding through one FIFO queue: the request
+    half when it arrives (tool results, file sampling, prompt) and the
+    response half when it ends (runs, tool uses, usage, turn end);
+  - the Anthropic dialect, SSE and JSON, gzip and deflate decoded for the
+    parser; session id from `metadata.user_id`'s `session_<uuid>`, else the
+    only hook-registered session, else a hash;
+  - only the main conversation is recorded: helper requests without tools
+    and sidechains are skipped; a compaction restarts it;
+  - `ATLAS_PROXY_TRACE=<file>` writes exchange shapes (roles, block types,
+    counts; no text, no headers) for diagnosis.
+- `internal/listener`: the loopback proxy port and `/hook` on the
+  peer-checked socket; `cli-run.json` gains the port.
+- `internal/agents/ambient`:
+  - an order-preserving JSON editor and `.atlas/cli.json` state;
+  - the Claude Code adapter: MCP entry in `.mcp.json` (no secret) approved
+    in `.claude/settings.local.json`; four command hooks and the status line
+    (wrapping an existing one) in `.claude/settings.json`; removal restores
+    the user's files byte for byte.
+- Commands:
+  - `atlas shell`: writer lock, listener, env (`ANTHROPIC_BASE_URL`,
+    `ATLAS_PROXY_PORT`, `ATLAS_SHELL`, `NO_PROXY`), `$SHELL -i`;
+  - `atlas env [--shell sh|fish]`;
+  - `atlas hook claude session-start|user-prompt-submit|stop|session-end`:
+    never fails; the session-start banner is JSON only, `systemMessage`, no
+    `additionalContext`;
+  - `atlas statusline claude`;
+  - `memory enable|disable` and `capture enable|disable` now install and
+    remove the Claude Code entries.
+
+Verified against the desktop's own data (this repo's desktop-written
+sessions.db, profiled from a copy):
+
+- `sketch_after`: reproduced on all 257 file touches whose files are
+  unchanged. FNV-1a 32 over distinct trimmed non-blank lines, sorted
+  numerically, unpadded lowercase hex.
+- Message `content_hash` = sha256(body), preview = the first 2 KiB,
+  `body_bytes` = byte length: 131 of 131 rows.
+- Title derivation reproduces the desktop's stored title for this session
+  (119 characters + "…").
+- Formats taken from the data: `token_totals` key order, `redaction_counts`
+  in insertion order, lowercase ACP kinds, `locations` as `[{"path",…}]`, and
+  the `--- before / +++ after` patch.
+
+Verified live (Claude Code 2.1.296, headless `claude -p` through
+`atlas shell` in `~/Codes/atlas-test-3`, local binding):
+
+- One session under Claude's own session id. Source `acp`, agent
+  `claude-code`, model, branch, and title from the prompt.
+- One completed turn; the user prompt and the assistant reply.
+- Write, Edit and `mcp__atlas__memory_search` tool calls with results and
+  locations. The file touches carry the Write-time and Edit-time versions of
+  `notes.md`, and the patches match the edits.
+- Usage recorded for the turn; `redaction_counts` empty.
+- Memory through the bridge in the same run: remember, then search.
+  `memory verify` intact; a memory citing a deleted file came back stale.
+
+Found and fixed by the live runs:
+
+- Claude Code 2.1 puts a `system`-role message after the user's prompt, so
+  "last message is a user text" missed every prompt. A turn now starts from
+  the newest user text among the messages added since the last request.
+  Regression test added.
+- Sampling at the end of the response raced the agent's next tool, so a
+  Write was recorded with the file as the following Edit left it. The
+  request half now runs when the request arrives.
+- The entropy layer redacted `atlas-session:claude-code/<uuid>` writer URIs
+  in MCP results. Embedded UUIDs are now held out. Regression test added.
+
+Not verified / known gaps:
+
+- **Desktop acceptance**: open `~/Codes/atlas-test-3` in the desktop and
+  check the Timeline (title, tool calls, file touches) and that the session
+  appears once. The local binding has `import_approved=1`, so the desktop's
+  importer also reads Claude's transcripts. Earlier test runs (whose CLI rows
+  were reset) may therefore appear as imported sessions; the captured one
+  should not be duplicated, because its native id is Claude's session id.
+  I did not look in `~/.claude` to confirm the ids match (ground rule).
+- `metadata.user_id` carries `session_<uuid>` in Claude Code 2.1.296
+  (seen live: "user_id_has_session=true"). Hooks were installed but not
+  separately confirmed to fire in `-p` mode.
+- The memory bridge mints its own session id; it is not yet joined to the
+  capture session (ADR-0003's "needs a live check").
+- Brotli responses would be forwarded but not parsed (none seen live).
+- Git linkage (§6.6) is not built; the desktop links commits on open.
+- The adapter is a concrete type; the shared `Adapter` interface
+  (ADR-0000) will be extracted with the Gemini and Codex adapters in Phase 7.
