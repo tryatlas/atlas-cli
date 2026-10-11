@@ -1183,3 +1183,11 @@ https://github.com/tryatlas/atlas-cli/releases/tag/v0.2.0, four archives,
 `checksums.txt`, `install.sh`. CI and the release workflow were green on
 all four native runners. The anonymous installer delivers a build with the
 hooks commands.
+
+## v0.2.1: a turn reaches the cloud right after its hook
+
+A hook that writes the store directly now drains the new rows to the cloud
+Project within the drain's 3 s budget (signed in, cloud-bound; offline or
+rate-limited rows stay pending for the next drain). A turn delivered to
+`atlas serve` forces a drain instead of waiting for the 30 s tick. Before,
+without `atlas serve` nothing synced until `atlas capture sync`.

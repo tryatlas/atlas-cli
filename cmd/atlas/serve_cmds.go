@@ -188,7 +188,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 				return err
 			}
 			d.Root = p.Root
-			return hooks.Apply(ctx, h.Recorder, h.Listener.Memory, []hooks.Delivery{d})
+			if err := hooks.Apply(ctx, h.Recorder, h.Listener.Memory, []hooks.Delivery{d}); err != nil {
+				return err
+			}
+			if d.Turn != nil && h.Sync != nil {
+				h.Sync.Force() // the turn goes to the cloud now, not at the next tick
+			}
+			return nil
 		})
 		h.Listener.SetLinker(func(ctx context.Context) error {
 			_, err := gitlink.Link(ctx, h.Store, p.Root, time.Now)

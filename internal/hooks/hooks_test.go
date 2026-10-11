@@ -213,7 +213,7 @@ func TestDispatcherRecordsATurnDirectly(t *testing.T) {
 	st := enabledStore(t, root)
 	transcript := filepath.Join(t.TempDir(), "s.jsonl")
 	_ = os.WriteFile(transcript, []byte(`{"kind":"prompt","body":"earlier turn"}`+"\n"), 0o600)
-	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test"), Banner: "Atlas: on"}
+	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test", nil), Banner: "Atlas: on"}
 	sess := map[string]any{"Session": "s-1", "Transcript": transcript}
 
 	if out := runHook(t, d, "start", sess); string(out) != "Atlas: on" {
@@ -296,7 +296,7 @@ func TestATurnThatOnlyReadRecordsNothing(t *testing.T) {
 	st := enabledStore(t, root)
 	transcript := filepath.Join(t.TempDir(), "s.jsonl")
 	_ = os.WriteFile(transcript, nil, 0o600)
-	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test")}
+	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test", nil)}
 	sess := map[string]any{"Session": "s-2", "Transcript": transcript}
 	runHook(t, d, "start", sess)
 	runHook(t, d, "prompt", sess)
@@ -317,7 +317,7 @@ func TestSpoolWhenTheStoreIsLockedAndDrainLater(t *testing.T) {
 	}
 	transcript := filepath.Join(t.TempDir(), "s.jsonl")
 	_ = os.WriteFile(transcript, []byte(`{"kind":"prompt","body":"hi"}`+"\n"+`{"kind":"text","body":"hello"}`+"\n"), 0o600)
-	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test")}
+	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test", nil)}
 	sess := map[string]any{"Session": "s-3", "Transcript": transcript}
 	runHook(t, d, "start", sess)
 	runHook(t, d, "prompt", map[string]any{"Session": "s-3", "Transcript": transcript, "Prompt": "hi"})

@@ -13,6 +13,7 @@ import (
 
 	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	capsync "github.com/tryatlas/atlas-cli/internal/capture/sync"
 	"github.com/tryatlas/atlas-cli/internal/hooks"
 	"github.com/tryatlas/atlas-cli/internal/listener"
 	"github.com/tryatlas/atlas-cli/internal/project"
@@ -77,7 +78,7 @@ func runAgentHook(a hooks.Agent, verb string) func(*cobra.Command, []string) err
 		if !hooks.Enabled(ctx, p.Root) {
 			return nil
 		}
-		d := &hooks.Dispatcher{Root: p.Root, Version: version, Now: time.Now, Deliver: hooks.Deliver(version), Banner: banner(ctx, p.Root)}
+		d := &hooks.Dispatcher{Root: p.Root, Version: version, Now: time.Now, Deliver: hooks.Deliver(version, syncAfterHook), Banner: banner(ctx, p.Root)}
 		out, err := d.Run(ctx, a, ev)
 		if err != nil {
 			hooks.LogError(p.Root, a.ID(), verb, err)
@@ -87,6 +88,21 @@ func runAgentHook(a hooks.Agent, verb string) func(*cobra.Command, []string) err
 		}
 		return nil
 	}
+}
+
+// syncAfterHook sends what a direct hook write just recorded to the cloud,
+// within the drain's short budget, so a turn reaches the Project without
+// waiting for atlas serve or atlas capture sync. Offline or signed out it
+// does nothing; the rows stay pending for the next drain.
+func syncAfterHook(ctx context.Context, st *store.Store) {
+	b, err := st.Binding(ctx)
+	if err != nil || b == nil {
+		return
+	}
+	if _, ok := capsync.TargetOf(b); !ok || b.DrainState == store.DrainNotAuthorized {
+		return
+	}
+	_, _ = capsync.Drain(ctx, syncClient(), st, capsync.Budget, time.Now)
 }
 
 // banner is the SessionStart message: what is on, and which Project.

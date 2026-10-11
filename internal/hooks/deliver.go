@@ -34,8 +34,10 @@ var ErrSpooled = errors.New("spooled")
 // SpoolDir holds deliveries waiting for a writer.
 func SpoolDir(root string) string { return filepath.Join(Dir(root), "spool") }
 
-// Deliver is the default Dispatcher.Deliver.
-func Deliver(version string) func(ctx context.Context, d Delivery) error {
+// Deliver is the default Dispatcher.Deliver. afterDirect, when set, runs
+// after a direct write with the store still open: the caller syncs the new
+// rows to the cloud there, so a turn does not wait for the next atlas serve.
+func Deliver(version string, afterDirect func(ctx context.Context, st *store.Store)) func(ctx context.Context, d Delivery) error {
 	return func(ctx context.Context, d Delivery) error {
 		if rf := listener.ReadRunFile(d.Root); rf != nil {
 			if err := postHook(ctx, rf.Socket, d); err == nil {
@@ -44,7 +46,7 @@ func Deliver(version string) func(ctx context.Context, d Delivery) error {
 			// The listener is there but did not answer: fall through to a
 			// direct write, which fails on its lock and spools.
 		}
-		err := applyDirect(ctx, version, d.Root, []Delivery{d})
+		err := applyDirect(ctx, version, d.Root, []Delivery{d}, afterDirect)
 		if errors.Is(err, store.ErrLocked) {
 			if serr := spool(d); serr != nil {
 				return serr
@@ -114,7 +116,7 @@ func foldChanges(ctx context.Context, mem *server.Server, g server.Grant, root s
 
 // applyDirect takes the writer lock for the duration of the write, drains
 // the spool first, then applies ds.
-func applyDirect(ctx context.Context, version, root string, ds []Delivery) error {
+func applyDirect(ctx context.Context, version, root string, ds []Delivery, after func(ctx context.Context, st *store.Store)) error {
 	lock, err := store.Lock(root)
 	if err != nil {
 		return err
@@ -135,6 +137,9 @@ func applyDirect(ctx context.Context, version, root string, ds []Delivery) error
 		return err
 	}
 	ClearLastError(root)
+	if after != nil {
+		after(ctx, st)
+	}
 	return nil
 }
 

@@ -45,8 +45,9 @@ and Pi each ask once in their own UI. Keep `atlas` current on PATH, including
 At each turn end the hook reads the agent's transcript from where the turn
 started, diffs `git status`, and records the prompt, the reply, the tool calls
 with the files they wrote, token usage and the model. The hook writes to the
-store itself, or hands the turn to a running `atlas serve`, or spools it when
-the desktop app has the folder open. A hook never fails the agent: errors go to
+store itself and sends the turn to the cloud Project right away, or hands it to
+a running `atlas serve` (which syncs it at once), or spools it when the
+desktop app has the folder open. A hook never fails the agent: errors go to
 `.atlas/cli-hooks.log` and `atlas status`.
 
 | agent | hook written to | memory server written to |
