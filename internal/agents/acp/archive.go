@@ -193,6 +193,9 @@ func (a *Archives) install(ctx context.Context, agentDir, dir string, t BinaryTa
 	if err != nil {
 		return err
 	}
+	if err := os.Chmod(stage, 0o755); err != nil { //nolint:gosec // G302: the install dir holds executables others may run
+		return err
+	}
 	return os.Rename(stage, dir)
 }
 

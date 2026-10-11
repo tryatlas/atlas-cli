@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 	"github.com/tryatlas/atlas-cli/internal/hosts"
 	"github.com/tryatlas/atlas-cli/internal/ingest"
+	"github.com/tryatlas/atlas-cli/internal/memory/record"
 	"github.com/tryatlas/atlas-cli/internal/project"
 	"github.com/tryatlas/atlas-cli/internal/tui"
 )
@@ -414,6 +416,11 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 				who = fmt.Sprintf("%s <%s>", s.Identity.Name, s.Identity.Email)
 			}
 			fmt.Fprintf(w, "Account:   %s\n", who)
+			if id := s.ActiveOrgID(); id != "" {
+				fmt.Fprintf(w, "Org:       %s\n", orgLabel(s, id))
+			} else {
+				fmt.Fprintln(w, "Org:       none chosen (atlas org use)")
+			}
 		} else {
 			fmt.Fprintln(w, "Account:   not signed in (atlas login)")
 		}
@@ -447,14 +454,104 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(w, "Memory at: %s (shared with the whole repository)\n", p.ScopeRoot)
 	}
 	printGates(w, p.Root, b)
-	fmt.Fprintln(w, "Memory sync: this machine only")
 	if l, err := store.Lock(p.Root); errors.Is(err, store.ErrLocked) {
 		fmt.Fprintln(w, "Recorder:  another Atlas window (or atlas run / atlas serve) is recording this Project")
 	} else if err == nil {
 		_ = l.Release()
 		fmt.Fprintln(w, "Recorder:  idle")
 	}
+	printCaptureHealth(ctx, w, st, p.Root, b)
+	printMemoryHealth(ctx, w, p.ScopeRoot)
+	printAgents(w)
 	return nil
+}
+
+// printCaptureHealth: sessions, attention flags, open turns, the commit
+// cursor and rewrites, and the cloud outbox.
+func printCaptureHealth(ctx context.Context, w io.Writer, st *store.Store, root string, b *store.Binding) {
+	h, err := st.CaptureHealth(ctx, root)
+	if err != nil {
+		fmt.Fprintf(w, "Capture:   unreadable (%v)\n", err)
+		return
+	}
+	line := fmt.Sprintf("%d session(s)", h.Sessions)
+	if h.NeedsAttention > 0 {
+		line += fmt.Sprintf(", %d need attention", h.NeedsAttention)
+	}
+	if h.OpenTurns > 0 {
+		line += fmt.Sprintf(", %d turn(s) left open", h.OpenTurns)
+	}
+	fmt.Fprintf(w, "Sessions:  %s\n", line)
+	switch {
+	case h.Cursor == nil || h.Cursor.LastSeen == nil:
+		fmt.Fprintln(w, "Commits:   not walked yet (atlas capture link)")
+	default:
+		c := *h.Cursor.LastSeen
+		if len(c) > 7 {
+			c = c[:7]
+		}
+		line := "linked up to " + c
+		if h.Cursor.Recovered {
+			line += " (recovered after a lost cursor)"
+		}
+		if h.Orphaned > 0 {
+			line += fmt.Sprintf("; %d orphaned checkpoint(s)", h.Orphaned)
+		}
+		fmt.Fprintf(w, "Commits:   %s\n", line)
+	}
+	if b == nil || b.Mode != store.ModeCloud {
+		fmt.Fprintln(w, "Sync:      off (local Project)")
+		return
+	}
+	counts, _ := st.OutboxCounts(ctx)
+	state := "ok"
+	if b.DrainState == store.DrainNotAuthorized {
+		state = "refused by the server (403): check your access, then atlas capture sync"
+	}
+	fmt.Fprintf(w, "Sync:      %s · %d sent, %d pending, %d failed", state, counts[store.SyncSent], counts[store.SyncPending], counts[store.SyncFailed])
+	if counts[store.SyncFailed] > 0 {
+		fmt.Fprint(w, " (atlas capture retry)")
+	}
+	fmt.Fprintln(w)
+}
+
+// printMemoryHealth: entries and the revision chain, local only (D13).
+func printMemoryHealth(ctx context.Context, w io.Writer, scope string) {
+	rs, err := record.Open(scope, false)
+	if err != nil {
+		fmt.Fprintln(w, "Record:    no memory record yet · this machine only")
+		return
+	}
+	defer rs.Close()
+	n := 0
+	if es, err := rs.Active(ctx); err == nil {
+		n = len(es)
+	}
+	chain := "chain intact"
+	if rep, err := rs.VerifyChain(); err != nil {
+		chain = "chain unreadable"
+	} else if !rep.OK() {
+		chain = fmt.Sprintf("chain BROKEN at revision %d (atlas memory verify)", rep.FirstBad)
+	}
+	fmt.Fprintf(w, "Record:    %d memories · %s · this machine only\n", n, chain)
+}
+
+// printAgents lists the installed agents.
+func printAgents(w io.Writer) {
+	m, _, err := agentsStore().Installed()
+	if err != nil || len(m) == 0 {
+		fmt.Fprintln(w, "Agents:    none installed (atlas agents list)")
+		return
+	}
+	ids := make([]string, 0, len(m))
+	for id, e := range m {
+		if e.Type == "custom" {
+			id += " (custom)"
+		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	fmt.Fprintf(w, "Agents:    %s\n", strings.Join(ids, ", "))
 }
 
 func printGates(w io.Writer, dir string, b *store.Binding) {

@@ -16,15 +16,19 @@ import (
 
 	"github.com/spf13/cobra"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/tryatlas/atlas-cli/internal/agents/acp"
 	"github.com/tryatlas/atlas-cli/internal/project"
 	atlasrun "github.com/tryatlas/atlas-cli/internal/run"
+	"github.com/tryatlas/atlas-cli/internal/tui"
+	"github.com/tryatlas/atlas-cli/internal/tui/chat"
 )
 
 func newRunCmd() *cobra.Command {
 	c := withRun(leaf("run <agent>", "Run an ACP agent from the registry, with shared memory and full capture", cobra.ExactArgs(1)), runRun)
-	c.Flags().String("prompt", "", "send this one prompt, print the reply, and exit after the turn")
-	c.Flags().Bool("no-tui", false, "no chat screen: print to the terminal (with --prompt)")
+	c.Flags().String("prompt", "", "the first prompt (with --no-tui: send it, print the reply, and exit after the turn)")
+	c.Flags().Bool("no-tui", false, "no chat screen: run one --prompt and print to the terminal")
 	c.Flags().Bool("yes", false, "allow every permission the agent asks for (headless)")
 	c.Flags().String("resume", "", "continue an earlier ACP session id (session/load or session/resume)")
 	return c
@@ -34,8 +38,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	id := args[0]
 	prompt, _ := cmd.Flags().GetString("prompt")
-	if prompt == "" {
-		return errNoTUI
+	noTUI, _ := cmd.Flags().GetBool("no-tui")
+	if prompt == "" || (!noTUI && interactive()) {
+		if !interactive() {
+			return errNoTUI
+		}
+		return runChat(cmd, id, prompt)
 	}
 	yes, _ := cmd.Flags().GetBool("yes")
 	resume, _ := cmd.Flags().GetString("resume")
@@ -63,6 +71,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 	tty := interactive()
 	view := &headless{out: stdout, err: stderr, yes: yes, tty: tty, in: bufio.NewReader(cmd.InOrStdin())}
 	sess := atlasrun.NewSession(id, cwd, h, view)
+	if tty {
+		sess.ChooseAuth = chooseAuth
+	}
 	ag, inst, err := agentsStore().Launch(ctx, id, cwd, sess)
 	if err != nil {
 		_, _ = h.Close()
@@ -114,6 +125,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 			stop()
 		}
 	}()
+	view.mu.Lock()
+	view.live = true
+	view.mu.Unlock()
 	r, err := sess.Prompt(pctx, prompt, nil, nil)
 	view.endLine()
 	if err != nil {
@@ -141,6 +155,7 @@ type headless struct {
 	in       *bufio.Reader
 
 	mu      sync.Mutex
+	live    bool // the prompt was sent: a session/load replay is not printed
 	midLine bool
 	shown   map[string]string // tool call id → last status printed
 }
@@ -157,6 +172,9 @@ func (h *headless) endLine() {
 func (h *headless) Update(_ string, u acp.Update) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if !h.live {
+		return
+	}
 	if h.shown == nil {
 		h.shown = map[string]string{}
 	}
@@ -209,13 +227,20 @@ func (h *headless) Permission(ctx context.Context, req acp.PermissionRequest) (s
 		return "", false
 	}
 	if h.yes {
-		if id, ok := pick("allow"); ok {
+		id, ok := pick("allow_once") // never widen the agent's own approval mode
+		if !ok {
+			id, ok = pick("allow")
+		}
+		if ok {
 			h.note("  ✓ allowed: %s\n", tc.Title)
 			return id, true
 		}
 	}
 	if !h.tty {
 		h.note("  ✗ refused (no terminal; pass --yes to allow): %s\n", tc.Title)
+		if id, ok := pick("reject_once"); ok {
+			return id, true
+		}
 		return pick("reject")
 	}
 	h.mu.Lock()
@@ -270,3 +295,76 @@ func (h *headless) Elicit(ctx context.Context, e acp.Elicitation) acp.Elicitatio
 }
 
 func (h *headless) ElicitationComplete(string) {}
+
+// runChat opens the chat screen on a session.
+func runChat(cmd *cobra.Command, id, first string) error {
+	ctx := cmd.Context()
+	stderr := cmd.ErrOrStderr()
+	resume, _ := cmd.Flags().GetString("resume")
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	if cwd, err = project.Canonical(cwd); err != nil {
+		return err
+	}
+	p, err := project.Discover(ctx, cwd)
+	if err != nil {
+		return err
+	}
+	opts := hostOptions(false)
+	opts.CaptureOptional = true
+	h, err := atlasrun.StartHost(p.Root, opts)
+	if err != nil {
+		return err
+	}
+	bridge := chat.NewBridge()
+	c := &atlasrun.Chat{Agents: agentsStore(), Host: h, AgentID: id, Cwd: cwd, View: bridge,
+		ChooseAuth: chooseAuth,
+		Login: func(ctx context.Context, ag *acp.Agent, m acp.AuthMethod) error {
+			lc, ok := atlasrun.LoginCommand(ag.Command, m)
+			if !ok {
+				return fmt.Errorf("%s offers no sign-in command", ag.Name())
+			}
+			fmt.Fprintf(stderr, "Signing in to %s (%s)…\n", ag.Name(), m.Name)
+			return atlasrun.Login(ctx, lc, true, stderr, nil)
+		}}
+	fmt.Fprintf(stderr, "Starting %s…\n", id)
+	if err := c.Start(ctx, resume); err != nil {
+		_, _ = h.Close()
+		return err
+	}
+	c.Login, c.ChooseAuth = nil, nil // the screen owns the terminal from here
+	m := chat.New(ctx, c)
+	if first != "" {
+		m.Prefill(first)
+	}
+	prog := tea.NewProgram(m, tea.WithContext(ctx))
+	bridge.Attach(prog)
+	_, runErr := prog.Run()
+	c.Close(context.Background())
+	res, err := h.Close()
+	if err == nil && res.Checkpoints > 0 {
+		fmt.Fprintf(stderr, "Linked %d session commit(s).\n", res.Checkpoints)
+	}
+	if runErr != nil && !errors.Is(runErr, tea.ErrProgramKilled) && !errors.Is(runErr, context.Canceled) {
+		return runErr
+	}
+	return nil
+}
+
+// chooseAuth asks which of the agent's sign-in methods to use.
+func chooseAuth(ms []acp.AuthMethod) (acp.AuthMethod, bool) {
+	labels := make([]string, len(ms))
+	for i, m := range ms {
+		labels[i] = m.Name
+		if m.Description != "" {
+			labels[i] += " — " + m.Description
+		}
+	}
+	i, err := tui.Select("The agent needs you to sign in. How?", labels, 0)
+	if err != nil {
+		return acp.AuthMethod{}, false
+	}
+	return ms[i], true
+}

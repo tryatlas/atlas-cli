@@ -40,5 +40,9 @@ func runCaptureLink(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Checked %d commit(s); %d checkpoint(s) written.\n", res.Commits, res.Checkpoints)
+	if rw := res.Rewrites; rw.Relinked+rw.Orphaned+rw.Recovered+rw.Failed > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Rewritten history: %d relinked, %d orphaned, %d recovered, %d not checked.\n",
+			rw.Relinked, rw.Orphaned, rw.Recovered, rw.Failed)
+	}
 	return nil
 }

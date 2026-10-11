@@ -201,3 +201,41 @@ func TestRetainsWork(t *testing.T) {
 		t.Fatal("under half must not link")
 	}
 }
+
+func TestRewritesRelinkOrphanAndRecover(t *testing.T) {
+	f := newFixture(t)
+	f.agentWrites("a.go", "package a\n")
+	f.git("add", "a.go")
+	f.git("commit", "-q", "-m", "add a")
+	first := f.git("rev-parse", "HEAD")
+	if r := f.link(); r.Checkpoints != 1 {
+		t.Fatalf("%+v", r)
+	}
+	db := f.st.DB()
+	// Amend: same patch, new sha → relinked.
+	f.git("commit", "-q", "--amend", "-m", "add a (reworded)")
+	amended := f.git("rev-parse", "HEAD")
+	r := f.link()
+	if r.Rewrites.Relinked != 1 || q(t, db, `SELECT commit_sha || '|' || link_state FROM checkpoint`) != amended+"|linked" {
+		t.Fatalf("%+v %s", r.Rewrites, q(t, db, `SELECT commit_sha FROM checkpoint`))
+	}
+	if first == amended {
+		t.Fatal("amend kept the sha")
+	}
+	// Drop the commit: nothing carries the patch → orphaned, row kept.
+	base := f.git("rev-parse", "HEAD~1")
+	f.git("reset", "-q", "--hard", base)
+	r = f.link()
+	if r.Rewrites.Orphaned != 1 || q(t, db, `SELECT link_state FROM checkpoint`) != "orphaned" {
+		t.Fatalf("%+v", r.Rewrites)
+	}
+	if !strings.Contains(q(t, db, `SELECT reconcile_note FROM workspace_cursor`), `"orphaned":1`) {
+		t.Fatal(q(t, db, `SELECT reconcile_note FROM workspace_cursor`))
+	}
+	// Back again → recovered.
+	f.git("reset", "-q", "--hard", amended)
+	r = f.link()
+	if r.Rewrites.Recovered != 1 || q(t, db, `SELECT link_state FROM checkpoint`) != "linked" {
+		t.Fatalf("%+v", r.Rewrites)
+	}
+}

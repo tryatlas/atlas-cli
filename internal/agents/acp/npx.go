@@ -104,7 +104,43 @@ func binOf(p *packageJSON) string {
 // NpxInstall is a resolved npx agent.
 type NpxInstall struct {
 	Dir        string
-	Executable string // absolute path of the package's bin script
+	Executable string // absolute path of the package's bin
+	// Native: the bin is a native executable or a non-node script, run
+	// directly rather than as `node <bin>`.
+	Native bool
+}
+
+// nativeBin reads a bin's first bytes: an ELF or Mach-O binary, or a
+// "#!" script whose interpreter is not node, runs directly; JavaScript runs
+// with the managed node.
+func nativeBin(path string) bool {
+	f, err := os.Open(path) //nolint:gosec // G304: our install dir
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head := make([]byte, 128)
+	n, _ := f.Read(head)
+	head = head[:n]
+	switch {
+	case len(head) >= 4 && string(head[:4]) == "\x7fELF":
+		return true
+	case len(head) >= 4 && isMachO(head[:4]):
+		return true
+	case len(head) >= 2 && string(head[:2]) == "#!":
+		line, _, _ := strings.Cut(string(head), "\n")
+		return !strings.Contains(line, "node")
+	}
+	return false
+}
+
+func isMachO(b []byte) bool {
+	for _, m := range [][]byte{{0xfe, 0xed, 0xfa, 0xce}, {0xfe, 0xed, 0xfa, 0xcf}, {0xce, 0xfa, 0xed, 0xfe}, {0xcf, 0xfa, 0xed, 0xfe}, {0xca, 0xfe, 0xba, 0xbe}} {
+		if string(b) == string(m) {
+			return true
+		}
+	}
+	return false
 }
 
 // installNeeded applies the desktop's checks: no package.json, the installed
@@ -231,7 +267,7 @@ func ResolveNpx(ctx context.Context, n *Node, data, id string, d NpxDistribution
 	if _, err := os.Stat(exe); err != nil {
 		return nil, fmt.Errorf("%s has no runnable bin: %w", d.Package, err)
 	}
-	return &NpxInstall{Dir: dir, Executable: exe}, nil
+	return &NpxInstall{Dir: dir, Executable: exe, Native: nativeBin(exe)}, nil
 }
 
 // npmInstall wipes node_modules and the lock, installs the ceiling spec

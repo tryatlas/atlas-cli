@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -27,6 +28,7 @@ func newAgentsCmd() *cobra.Command {
 	return group("agents", "ACP agents from the registry",
 		list, install, uninstall,
 		withRun(leaf("detect", "Find registry agents already on PATH", cobra.NoArgs), runAgentsDetect),
+		newAgentsCheckCmd(),
 		withRun(leaf("logout <agent>", "Sign the agent out, when it supports it", cobra.ExactArgs(1)), runAgentsLogout),
 	)
 }
@@ -162,6 +164,10 @@ func runAgentsInstall(cmd *cobra.Command, args []string) error {
 	if err := m.Save(path); err != nil {
 		return err
 	}
+	if entry.Type == acp.TypeCustom {
+		fmt.Fprintf(cmd.OutOrStdout(), "Installed %s from %s: atlas run %s\n", e.Name, entry.Command, id)
+		return nil
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Installed %s %s. It downloads on first run: atlas run %s\n", e.Name, e.Version, id)
 	return nil
 }
@@ -229,4 +235,67 @@ func (nopHost) Elicit(context.Context, acp.Elicitation) acp.ElicitationAnswer {
 }
 func (nopHost) ElicitationComplete(string) {}
 
-var errNoTUI = errors.New("the chat screen is not built yet; pass --prompt \"…\" (with --no-tui) to run one prompt")
+var errNoTUI = errors.New("the chat screen needs a terminal; pass --prompt \"…\" --no-tui to run one prompt")
+
+func newAgentsCheckCmd() *cobra.Command {
+	c := withRun(leaf("check [agent...]", "Install, launch and handshake agents; report capabilities and sign-in", cobra.ArbitraryArgs), runAgentsCheck)
+	c.Flags().Bool("all", false, "check every registry agent that runs on this machine")
+	c.Flags().Duration("timeout", 5*time.Minute, "per-agent limit, download included")
+	return c
+}
+
+func runAgentsCheck(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	a := agentsStore()
+	a.Progress = nil
+	reg, rerr := a.Catalog(ctx, false)
+	if reg == nil {
+		return rerr
+	}
+	all, _ := cmd.Flags().GetBool("all")
+	limit, _ := cmd.Flags().GetDuration("timeout")
+	var entries []acp.Entry
+	switch {
+	case all:
+		for _, e := range reg.Agents {
+			if e.Supported() {
+				entries = append(entries, e)
+			}
+		}
+	case len(args) == 0:
+		return errors.New("name agents to check, or pass --all")
+	default:
+		for _, id := range args {
+			e, ok := reg.Find(id)
+			if !ok {
+				return fmt.Errorf("%s: %w", id, acp.ErrNotInRegistry)
+			}
+			entries = append(entries, e)
+		}
+	}
+	w := cmd.OutOrStdout()
+	failed := 0
+	for _, e := range entries {
+		fmt.Fprintf(cmd.ErrOrStderr(), "checking %s…\n", e.ID)
+		r := a.Check(ctx, e, limit)
+		if r.Err != nil {
+			failed++
+			fmt.Fprintf(w, "%s %s (%s): FAILED %v [%s]\n", r.ID, r.Version, r.Kind, firstErrLine(r.Err), r.Took)
+			continue
+		}
+		fmt.Fprintf(w, "%s %s (%s): %s · protocol %d · session: %s · caps: %s · sign-in: %s [%s]\n", r.ID, r.Version, r.Kind,
+			r.Agent, r.Protocol, r.Session, strings.Join(r.Caps, ","), strings.Join(r.Auth, ", "), r.Took)
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d agent(s) failed", failed, len(entries))
+	}
+	return nil
+}
+
+func firstErrLine(err error) string {
+	s, _, _ := strings.Cut(strings.TrimSpace(err.Error()), "\n")
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
+}

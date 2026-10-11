@@ -114,3 +114,24 @@ func nodeCPUName() string {
 	_, c, _ := strings.Cut(p, "-")
 	return c
 }
+
+func TestNativeBin(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]struct {
+		body   []byte
+		native bool
+	}{
+		"js":      {[]byte("#!/usr/bin/env node\nconsole.log(1)\n"), false},
+		"plain":   {[]byte("require('./x')\n"), false},
+		"sh":      {[]byte("#!/bin/sh\nexec x\n"), true},
+		"elf":     {[]byte("\x7fELF\x02\x01\x01"), true},
+		"macho64": {[]byte{0xcf, 0xfa, 0xed, 0xfe, 7, 0, 0, 1}, true},
+	}
+	for name, c := range cases {
+		p := filepath.Join(dir, name)
+		_ = os.WriteFile(p, c.body, 0o755)
+		if got := nativeBin(p); got != c.native {
+			t.Errorf("%s: %v", name, got)
+		}
+	}
+}

@@ -53,6 +53,12 @@ func TestMCPBridgeThenVerifyExportImport(t *testing.T) {
 		t.Fatalf("remember: %s", out)
 	}
 
+	if code, out, e := runCmd(t, "memory", "list", "--kind", "decision"); code != 0 || !strings.Contains(out, "\tdecision\tactive\tUse Postgres for the ledger") {
+		t.Fatalf("list %d: %q %s", code, out, e)
+	}
+	if code, out, _ := runCmd(t, "memory", "list", "--search", "ledger"); code != 0 || !strings.Contains(out, "Postgres") {
+		t.Fatalf("search %d: %q", code, out)
+	}
 	code, out, e = runCmd(t, "memory", "verify")
 	if code != 0 || !strings.Contains(out, "Revision chain intact: 1 revisions") {
 		t.Fatalf("verify %d: %s %s", code, out, e)

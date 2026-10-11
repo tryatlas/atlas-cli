@@ -4,12 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/tryatlas/atlas-cli/internal/memory/record"
 	"github.com/tryatlas/atlas-cli/internal/memory/server"
 	"github.com/tryatlas/atlas-cli/internal/project"
+	"github.com/tryatlas/atlas-cli/internal/tui/memview"
 )
 
 // openRecord opens the shared-memory record of the repository around the cwd.
@@ -94,4 +97,50 @@ func runMCPBridge(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return server.RunBridge(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), f)
+}
+
+// runMemoryBrowse opens the memory browser.
+func runMemoryBrowse(cmd *cobra.Command, _ []string) error {
+	if !interactive() {
+		return errors.New("the browser needs a terminal; use atlas memory list")
+	}
+	st, err := openRecord(cmd, false)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	_, err = tea.NewProgram(memview.New(cmd.Context(), st, st.ScopeRoot), tea.WithContext(cmd.Context())).Run()
+	return err
+}
+
+// runMemoryList prints entries, one per line: id, kind, status, content.
+func runMemoryList(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
+	kind, _ := cmd.Flags().GetString("kind")
+	q, _ := cmd.Flags().GetString("search")
+	st, err := openRecord(cmd, false)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	var kinds []string
+	if kind != "" {
+		kinds = []string{kind}
+	}
+	var es []*record.Entry
+	if q != "" {
+		hits, err := st.Search(ctx, q, kinds, 100)
+		if err != nil {
+			return err
+		}
+		for _, h := range hits {
+			es = append(es, h.Entry)
+		}
+	} else if es, err = st.Active(ctx, kinds...); err != nil {
+		return err
+	}
+	for _, e := range es {
+		fmt.Fprintf(cmd.OutOrStdout(), "%d\t%s\t%s\t%s\n", e.ID, e.Kind, e.State, strings.Join(strings.Fields(e.Content), " "))
+	}
+	return nil
 }

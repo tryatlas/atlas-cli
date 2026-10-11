@@ -103,6 +103,9 @@ func TestEnsureInstallsVerifiesAndMasks(t *testing.T) {
 	if info, _ := os.Stat(p); info.Mode().Perm() != 0o755 {
 		t.Fatalf("mode %v", info.Mode().Perm())
 	}
+	if info, _ := os.Stat(filepath.Dir(filepath.Dir(filepath.Dir(p)))); info.Mode().Perm() != 0o755 {
+		t.Fatalf("version dir mode %v", info.Mode().Perm())
+	}
 	if _, err := a.Ensure(ctx, "y", "1.0", BinaryTarget{Archive: srv.URL + "/a.tar.gz", Cmd: "./pkg/bin/agent", SHA256: strings.Repeat("0", 64)}, nil, nil); err == nil ||
 		!strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("checksum mismatch accepted: %v", err)
@@ -136,5 +139,16 @@ func TestTarEscapeRefused(t *testing.T) {
 	_ = os.WriteFile(p, data, 0o644)
 	if err := extractTarGz(p, t.TempDir(), 1<<20); err == nil {
 		t.Fatal("path traversal accepted")
+	}
+}
+
+func TestExitedAgentKeepsItsStderr(t *testing.T) {
+	p, err := Spawn(Command{Path: "/bin/sh", Args: []string{"-c", "echo boom-from-stderr >&2; exit 3"}}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-p.Exited()
+	if e := p.exitedError(); !strings.Contains(e.Stderr, "boom-from-stderr") || !strings.Contains(e.Status, "3") {
+		t.Fatalf("%+v", e)
 	}
 }

@@ -127,3 +127,114 @@ func (s *Store) ConsumeTouches(ctx context.Context, sessionID, path, sha string,
 		sha, sessionID, path, timefmt.RFC3339(commitTime.Add(time.Second)))
 	return err
 }
+
+// LinkedCheckpoint is a checkpoint as reconciliation sees it.
+type LinkedCheckpoint struct {
+	ID, SessionID, CommitSHA, LinkState string
+	PatchID, Branch                     *string
+}
+
+// ProjectCheckpoints lists a Project's checkpoints.
+func (s *Store) ProjectCheckpoints(ctx context.Context, workspaceID string) ([]LinkedCheckpoint, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT c.id, c.session_id, c.commit_sha, c.link_state, c.patch_id, c.branch
+	    FROM checkpoint c JOIN agent_session s ON s.id = c.session_id WHERE s.workspace_id = ? ORDER BY c.created_at`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LinkedCheckpoint
+	for rows.Next() {
+		var c LinkedCheckpoint
+		if err := rows.Scan(&c.ID, &c.SessionID, &c.CommitSHA, &c.LinkState, &c.PatchID, &c.Branch); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// SetLinkState marks a checkpoint linked or orphaned; a sent row sends again.
+func (s *Store) SetLinkState(ctx context.Context, id, state string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE checkpoint SET link_state = ?, `+resync+` WHERE id = ?`, state, id)
+	return err
+}
+
+// RelinkCheckpoint re-points a checkpoint at the commit that now carries the
+// same change. When the session already has a row at that commit, that row
+// absorbs this one.
+func (s *Store) RelinkCheckpoint(ctx context.Context, cp LinkedCheckpoint, sha string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var existing string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM checkpoint WHERE session_id = ? AND commit_sha = ?`, cp.SessionID, sha).Scan(&existing)
+	switch {
+	case err == nil:
+		if _, err := tx.ExecContext(ctx, `DELETE FROM checkpoint WHERE id = ?`, cp.ID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE checkpoint SET link_state = 'linked', `+resync+` WHERE id = ?`, existing); err != nil {
+			return err
+		}
+	case errors.Is(err, sql.ErrNoRows):
+		if _, err := tx.ExecContext(ctx, `UPDATE checkpoint SET commit_sha = ?, link_state = 'linked', `+resync+` WHERE id = ?`, sha, cp.ID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE file_touch SET consumed_by_commit = ? WHERE session_id = ? AND consumed_by_commit = ?`,
+			sha, cp.SessionID, cp.CommitSHA); err != nil {
+			return err
+		}
+	default:
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetReconcileNote records {"orphaned","relinked","failed","at"} on the cursor.
+func (s *Store) SetReconcileNote(ctx context.Context, workspaceID string, orphaned, relinked, failed int, now time.Time) error {
+	note, _ := json.Marshal(struct {
+		Orphaned int    `json:"orphaned"`
+		Relinked int    `json:"relinked"`
+		Failed   int    `json:"failed"`
+		At       string `json:"at"`
+	}{orphaned, relinked, failed, timefmt.RFC3339(now)})
+	_, err := s.db.ExecContext(ctx, `INSERT INTO workspace_cursor (workspace_id, last_seen_commit, recovered, updated_at, reconcile_note)
+	    VALUES (?, NULL, 0, ?, ?) ON CONFLICT (workspace_id) DO UPDATE SET reconcile_note = excluded.reconcile_note`,
+		workspaceID, timefmt.RFC3339(now), string(note))
+	return err
+}
+
+// ReconcileNote reads the last note ("" when none).
+func (s *Store) ReconcileNote(ctx context.Context, workspaceID string) string {
+	var n sql.NullString
+	_ = s.db.QueryRowContext(ctx, `SELECT reconcile_note FROM workspace_cursor WHERE workspace_id = ?`, workspaceID).Scan(&n)
+	return n.String
+}
+
+// Health is the capture-health summary atlas status shows.
+type Health struct {
+	Sessions, NeedsAttention, OpenTurns, Orphaned int
+	Cursor                                        *Cursor
+	ReconcileNote                                 string
+}
+
+// CaptureHealth reads the summary for a Project.
+func (s *Store) CaptureHealth(ctx context.Context, workspaceID string) (Health, error) {
+	var h Health
+	err := s.db.QueryRowContext(ctx, `SELECT
+	    (SELECT COUNT(*) FROM agent_session WHERE workspace_id = ?1),
+	    (SELECT COUNT(*) FROM agent_session WHERE workspace_id = ?1 AND needs_attention = 1),
+	    (SELECT COUNT(*) FROM turn t JOIN agent_session s ON s.id = t.session_id WHERE s.workspace_id = ?1 AND t.state = 'open'),
+	    (SELECT COUNT(*) FROM checkpoint c JOIN agent_session s ON s.id = c.session_id WHERE s.workspace_id = ?1 AND c.link_state = 'orphaned')`,
+		workspaceID).Scan(&h.Sessions, &h.NeedsAttention, &h.OpenTurns, &h.Orphaned)
+	if err != nil {
+		return h, err
+	}
+	if h.Cursor, err = s.GetCursor(ctx, workspaceID); err != nil {
+		return h, err
+	}
+	h.ReconcileNote = s.ReconcileNote(ctx, workspaceID)
+	return h, nil
+}

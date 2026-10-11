@@ -3,9 +3,11 @@ package run
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -37,8 +39,14 @@ type Session struct {
 	Cwd     string
 	Agent   *acp.Agent
 	ID      string // the ACP session id
+
+	stateMu sync.Mutex // guards Modes and Config: the agent's queue writes, the screen reads
 	Modes   *acp.Modes
 	Config  []acp.ConfigOption
+
+	// ChooseAuth picks among several usable sign-in methods; nil takes the
+	// first (terminal methods first).
+	ChooseAuth func([]acp.AuthMethod) (acp.AuthMethod, bool)
 
 	host  *Host
 	view  View
@@ -154,23 +162,75 @@ func (s *Session) Reopen(ctx context.Context, id string) error {
 
 func (s *Session) adopt(ctx context.Context, r *acp.NewSessionResult) {
 	s.bind(ctx, r.SessionID)
+	s.stateMu.Lock()
 	s.Modes = r.Modes
 	s.Config = acp.ParseConfigOptions(r.RawConfigOptions)
+	s.stateMu.Unlock()
+}
+
+// State is a copy of the session's modes and config options.
+func (s *Session) State() (*acp.Modes, []acp.ConfigOption) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	var m *acp.Modes
+	if s.Modes != nil {
+		c := *s.Modes
+		m = &c
+	}
+	return m, append([]acp.ConfigOption(nil), s.Config...)
+}
+
+// SetMode switches the mode (session/set_mode) and records it.
+func (s *Session) SetMode(ctx context.Context, modeID string) error {
+	if err := s.Agent.SetMode(ctx, s.ID, modeID); err != nil {
+		return err
+	}
+	s.stateMu.Lock()
+	if s.Modes != nil {
+		s.Modes.CurrentModeID = modeID
+	}
+	s.stateMu.Unlock()
+	return nil
+}
+
+// SetConfig sets an option; the answer's options replace the list. A mode
+// select is mirrored into the modes.
+func (s *Session) SetConfig(ctx context.Context, configID string, value any) error {
+	raw, err := s.Agent.SetConfigOption(ctx, s.ID, configID, value)
+	if err != nil {
+		return err
+	}
+	s.setConfig(raw)
+	return nil
+}
+
+func (s *Session) setConfig(raw json.RawMessage) {
+	opts := acp.ParseConfigOptions(raw)
+	if len(opts) == 0 {
+		return
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.Config = opts
+	if m := acp.ModesFromConfig(opts); m != nil {
+		if s.Modes == nil {
+			s.Modes = m
+		} else {
+			s.Modes.CurrentModeID = m.CurrentModeID
+		}
+	}
 }
 
 // ApplyDefaultMode sends set_mode when the installed entry names a mode the
 // agent offers; a failure is rolled back locally.
 func (s *Session) ApplyDefaultMode(ctx context.Context, mode string) {
-	if mode == "" || s.Modes == nil || s.Modes.CurrentModeID == mode {
+	modes, _ := s.State()
+	if mode == "" || modes == nil || modes.CurrentModeID == mode {
 		return
 	}
-	for _, m := range s.Modes.AvailableModes {
+	for _, m := range modes.AvailableModes {
 		if m.ID == mode {
-			prev := s.Modes.CurrentModeID
-			s.Modes.CurrentModeID = mode
-			if s.Agent.SetMode(ctx, s.ID, mode) != nil {
-				s.Modes.CurrentModeID = prev
-			}
+			_ = s.SetMode(ctx, mode) // a failure leaves the mode as it was
 			return
 		}
 	}
@@ -191,21 +251,38 @@ func (e *AuthError) Error() string {
 			b.WriteString(": " + m.Description)
 		}
 	}
-	b.WriteString("\nAtlas runs only terminal sign-in methods and never guesses a login command.")
+	b.WriteString("\nAtlas runs terminal and agent sign-in methods; for an environment-variable method, export it and run again. It never guesses a login command.")
 	return b.String()
 }
 
 func (s *Session) signIn(ctx context.Context, login func(context.Context, acp.AuthMethod) error) error {
+	var usable []acp.AuthMethod
 	for _, m := range s.Agent.Init.AuthMethods {
-		if !m.IsTerminal() || login == nil {
-			continue
+		switch {
+		case m.IsTerminal() && login != nil:
+			usable = append(usable, m)
+		case m.Kind() == "agent" && !m.IsTerminal():
+			usable = append(usable, m) // the agent runs its own flow inside authenticate
 		}
+	}
+	if len(usable) == 0 {
+		return &AuthError{Methods: s.Agent.Init.AuthMethods}
+	}
+	// Terminal methods first, then the agent's own; the user may pick.
+	sort.SliceStable(usable, func(i, j int) bool { return usable[i].IsTerminal() && !usable[j].IsTerminal() })
+	m := usable[0]
+	if s.ChooseAuth != nil && len(usable) > 1 {
+		var ok bool
+		if m, ok = s.ChooseAuth(usable); !ok {
+			return errors.New("sign-in cancelled")
+		}
+	}
+	if m.IsTerminal() {
 		if err := login(ctx, m); err != nil {
 			return err
 		}
-		return s.Agent.Authenticate(ctx, m)
 	}
-	return &AuthError{Methods: s.Agent.Init.AuthMethods}
+	return s.Agent.Authenticate(ctx, m)
 }
 
 func (s *Session) revoke() {
@@ -226,7 +303,8 @@ func (s *Session) Close(ctx context.Context) {
 // recSession names the session for the recorder.
 func (s *Session) recSession() record.Session {
 	model := ""
-	for _, o := range s.Config {
+	_, config := s.State()
+	for _, o := range config {
 		if o.Category == "model" && o.Type == "select" {
 			model = o.Current()
 		}
@@ -361,14 +439,13 @@ func (s *Session) capture(u acp.Update) {
 			_ = rec.Gauge(ctx, s.recSession(), u.Used, u.Size)
 		}
 	case "config_option_update":
-		s.Config = acp.ParseConfigOptions(u.ConfigOptions)
-		if m := acp.ModesFromConfig(s.Config); m != nil && s.Modes != nil {
-			s.Modes.CurrentModeID = m.CurrentModeID
-		}
+		s.setConfig(u.ConfigOptions)
 	case "current_mode_update":
+		s.stateMu.Lock()
 		if s.Modes != nil {
 			s.Modes.CurrentModeID = u.CurrentModeID
 		}
+		s.stateMu.Unlock()
 	}
 }
 

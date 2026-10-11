@@ -105,6 +105,8 @@ func newMemoryCmd() *cobra.Command {
 		withRun(leaf("enable", "Turn shared memory on for this repository", cobra.NoArgs), runMemoryGate(true)),
 		withRun(leaf("disable", "Turn shared memory off for this repository", cobra.NoArgs), runMemoryGate(false)),
 		withRun(leaf("verify", "Verify the memory revision hash chain", cobra.NoArgs), runMemoryVerify),
+		withRun(leaf("browse", "Browse shared memory: entries by kind, search, history", cobra.NoArgs), runMemoryBrowse),
+		newMemoryListCmd(),
 		withRun(leaf("export <dir>", "Export durable memories as an Agent Memory Repo (MEMORY.md and one file per kind)", cobra.ExactArgs(1)), runMemoryExport),
 		withRun(leaf("import <file-or-dir>", "Import Agent Memory Repo files as candidate memories", cobra.ExactArgs(1)), runMemoryImport),
 	)
@@ -148,4 +150,11 @@ func commandPaths(root *cobra.Command) []string {
 	}
 	walk(root)
 	return out
+}
+
+func newMemoryListCmd() *cobra.Command {
+	c := withRun(leaf("list", "Print shared memory entries (for scripts; atlas memory browse on a terminal)", cobra.NoArgs), runMemoryList)
+	c.Flags().String("kind", "", "only this kind: plan, file_changed, decision, fact, failure, architecture, preference")
+	c.Flags().String("search", "", "search instead of listing")
+	return c
 }

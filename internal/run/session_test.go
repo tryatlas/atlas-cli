@@ -231,7 +231,13 @@ func TestAuthRequiredRunsTheTerminalMethodThenRetries(t *testing.T) {
 	}
 	s2, _, _ := start(t, "auth", "", &testView{})
 	if err := s2.Open(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "never guesses") {
-		t.Fatalf("no login runner: %v", err)
+		t.Fatalf("no login runner and no agent method: %v", err)
+	}
+	// An agent-kind method is authenticated directly; the agent runs its own flow.
+	s3, _, _ := start(t, "auth", `{}`, &testView{})
+	s3.Agent.Init.AuthMethods = []acp.AuthMethod{{ID: "oauth", Name: "Browser", Type: ""}}
+	if err := s3.Open(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "does not support signing in this way") {
+		t.Fatalf("the fake agent answers not implemented, which is not success for a non-terminal method: %v", err)
 	}
 }
 

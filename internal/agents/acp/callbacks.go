@@ -33,13 +33,13 @@ func (h *handler) Notify(method string, params json.RawMessage) {
 		if !known {
 			return // unknown sessionId: dropped
 		}
-		h.a.host.Update(n.SessionID, u)
+		h.a.hostNow().Update(n.SessionID, u)
 	case "session/complete_elicitation", "elicitation/complete":
 		var p struct {
 			ElicitationID string `json:"elicitationId"`
 		}
 		if json.Unmarshal(params, &p) == nil && p.ElicitationID != "" {
-			h.a.host.ElicitationComplete(p.ElicitationID)
+			h.a.hostNow().ElicitationComplete(p.ElicitationID)
 		}
 	}
 }
@@ -138,6 +138,9 @@ func (h *handler) readTextFile(params json.RawMessage) (any, *RPCError) {
 		return nil, Errorf("%v", err)
 	}
 	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, NotFound(path)
+	}
 	if err != nil {
 		return nil, Errorf("%v", err)
 	}
@@ -226,7 +229,7 @@ func (h *handler) permission(ctx context.Context, params json.RawMessage) (any, 
 			}
 		}()
 	}
-	id, ok := h.a.host.Permission(pctx, req)
+	id, ok := h.a.hostNow().Permission(pctx, req)
 	if ok && pctx.Err() == nil {
 		for _, o := range req.Options {
 			if o.OptionID == id {
@@ -276,7 +279,7 @@ func (h *handler) elicit(ctx context.Context, params json.RawMessage) (any, *RPC
 	default:
 		return map[string]any{"action": "decline"}, nil
 	}
-	ans := h.a.host.Elicit(ctx, e)
+	ans := h.a.hostNow().Elicit(ctx, e)
 	switch ans.Action {
 	case "accept":
 		content := ans.Content

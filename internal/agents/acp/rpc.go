@@ -27,6 +27,7 @@ const (
 	CodeInvalidParams  = -32602
 	CodeInternalError  = -32603
 	CodeAuthRequired   = -32000
+	CodeNotFound       = -32002 // ACP "Resource not found"
 	CodeCancelled      = -32800
 )
 
@@ -66,6 +67,12 @@ func AsRPCError(err error) (*RPCError, bool) {
 func Errorf(format string, a ...any) *RPCError {
 	d, _ := json.Marshal(map[string]string{"details": fmt.Sprintf(format, a...)})
 	return &RPCError{Code: CodeInternalError, Message: "Internal error", Data: d}
+}
+
+// NotFound is ACP's "Resource not found" for a path that does not exist.
+func NotFound(path string) *RPCError {
+	d, _ := json.Marshal(map[string]string{"uri": "file://" + path})
+	return &RPCError{Code: CodeNotFound, Message: "Resource not found", Data: d}
 }
 
 // Handler serves what the agent sends. Notify runs on the serial queue and
@@ -182,6 +189,7 @@ func (c *Conn) read(r io.Reader) {
 }
 
 func (c *Conn) dispatch(line []byte) {
+	trace("in", line)
 	var m envelope
 	if json.Unmarshal(line, &m) != nil {
 		return // not JSON-RPC: dropped, never logged
@@ -259,6 +267,7 @@ func (c *Conn) write(v any) error {
 	if err != nil {
 		return err
 	}
+	trace("out", b)
 	b = append(b, '\n')
 	c.wmu.Lock()
 	defer c.wmu.Unlock()

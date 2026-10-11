@@ -115,6 +115,20 @@ func Connect(ctx context.Context, id string, cmd Command, dir, version string, h
 	return a, nil
 }
 
+// Rehost points the agent's updates and questions at another host (a new
+// session on the same connection).
+func (a *Agent) Rehost(h Host) {
+	a.mu.Lock()
+	a.host = h
+	a.mu.Unlock()
+}
+
+func (a *Agent) hostNow() Host {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.host
+}
+
 // Name is agentInfo.name, else the id; Version is agentInfo.version.
 func (a *Agent) Name() string {
 	if a.Init.AgentInfo != nil && a.Init.AgentInfo.Name != "" {

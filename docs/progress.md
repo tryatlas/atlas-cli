@@ -708,3 +708,231 @@ Reference notes:
 
 Not yet verified: the desktop checklist (`docs/acceptance/acp.md`). Not built
 yet: the chat TUI (Phase 8). `atlas run` without `--prompt` says so.
+
+## Phase 7 (finished) — every registry agent on this machine
+
+The desktop checklist results have not arrived yet (the message carried a
+`<paste>` placeholder), so nothing from it is fixed yet.
+
+`ATLAS_ACP_TRACE=<file>` (new) records the **shape** of every message:
+direction, method, id, error code, update kind, tool call id, status, and
+the keys present. It never records a value. The evidence below comes from
+it.
+
+| agent | install | sign-in | file-editing prompt | notes |
+|---|---|---|---|---|
+| `claude-acp` 0.89.1 | npx (managed Node) | none needed: Claude Code's existing login | ✅ Write, Edit, Bash; `atlas_memory` used | `--resume` → `session/load` replayed history; the new turn was recorded as turn 2 of the same session |
+| `codex-acp` 2.2.2 | npx | none needed: Codex's ChatGPT login was picked up | ✅ via shell (`cat > codex-notes.md`) | no permission prompts (Codex's own approval policy); model `gpt-6-luna`; usage per turn plus gauges |
+| `gemini` 0.63.0 | npx | none needed: `GEMINI_API_KEY` in the env | ✅ write tool (after recovering), shell | two fixes below |
+| `opencode` 1.18.21 | `--detected` (PATH, custom entry) | none needed | ✅ `write` tool → Write, file touch, patch | model `opencode/big-pickle`, usage plus gauges |
+
+Every session, message, tool call and checkpoint reached `sent`.
+
+Not run: the other 37 registry agents. None is on this machine (`atlas
+agents detect` finds only opencode), and each needs an account of its
+own. I did not create accounts or install them speculatively. The
+terminal-auth path (AuthRequired → login command → authenticate "not
+implemented" → retry) is covered only by the fixture agent, because no
+installed agent asked to sign in.
+
+Fixes from these runs (none per agent):
+
+- **`fs/read_text_file` of a missing file now answers ACP's `-32002`
+  "Resource not found"**, not `-32603`. Wire: gemini sent
+  `fs/read_text_file` 4×, got `error:-32603` 4×, and its write tool failed.
+  gemini-cli maps "Resource not found" / "ENOENT" / "No such file" in an
+  error message to ENOENT. The evidence does not say what the desktop
+  answers here; please check `handlers.rs:402-513` (evidence-acp.md:385).
+- **Headless `--yes` picks `allow_once` before `allow_always`.** Gemini
+  answered an `allow_always` selection with "privileged approval modes
+  cannot be enabled in an untrusted folder". Allowing once never widens
+  the agent's own approval mode. Without a terminal, `reject_once` is
+  preferred too.
+- Headless output no longer prints a `session/load` replay.
+- `atlas agents install --detected` says where the copy is from.
+
+Agent behaviour recorded, not changed:
+
+- **codex-acp announces a shell call after running it.** Wire: `tool_call`
+  `in_progress` at 23:56:56.934, `completed` at .937. The shell window's
+  "before" snapshot already contains the new file, so after − before is
+  empty: the call is captured, the file touch is not. The desktop takes
+  its snapshot from the same notification, so it has the same gap.
+- **gemini-cli's write tool still fails once for a new file** ("Error
+  checking existing file: Resource not found"). Its
+  `normalizeFileSystemError` only matches an `Error` instance, and its ACP
+  client rejects with a plain object. It recovers (`touch`, then a
+  successful write). Only per-agent code could avoid this.
+- gemini sends no usage; `token_totals` stays `{}` apart from gauges.
+
+## Phase 8 (first part) — the chat TUI
+
+`atlas run <agent>` on a terminal opens the chat screen
+(`internal/tui/chat`, Bubble Tea v2.1 with `charm.land/bubbles/v2` 2.2.1 for
+the textarea and viewport, both pure Go). `--prompt` without `--no-tui`
+pre-fills the input; `--no-tui` is the headless run. Sign-in runs before
+the screen takes the terminal.
+
+- **One theme file** (`internal/tui/theme.go`) holds every colour, as ANSI
+  palette indices so the terminal's theme decides the shades. The old
+  picker's colour literal moved there; nothing else names a colour.
+- **Nothing branches on an agent id**: no file under `internal/tui` or
+  `internal/run` names one. Every affordance is driven by capabilities and
+  advertisements:
+  - mode picker (ctrl+t) from `modes`, or a `category:"mode"` select;
+  - model picker (ctrl+p) from a `category:"model"` select;
+  - settings (ctrl+g) from `configOptions`, select and boolean;
+  - slash picker from `available_commands_update`;
+  - image attach (ctrl+o) only when `promptCapabilities.image`;
+  - session list (ctrl+l) only when `sessionCapabilities.list`;
+  - load or resume chosen by capability.
+- Transcript:
+  - streamed text and thinking (thinking folded to three lines, ctrl+e
+    expands);
+  - tool-call cards with a status glyph, kind, locations with line
+    numbers, and diffs from `diff` content blocks (LCS, three lines of
+    context, tested);
+  - terminal output from client terminals and from
+    `_meta.terminal_output`/`terminal_exit`;
+  - a plan block updated in place; session titles as notices.
+- Questions:
+  - permission overlay with the agent's own options (name and kind);
+  - elicitation forms built from `requestedSchema` in document order:
+    string, number, integer, boolean, enum, required checks;
+  - URL prompts (o opens a browser, enter accepts, ctrl+d declines);
+  - `elicitation/complete` closes a URL prompt;
+  - a question the agent withdraws (cancelled request) closes its overlay;
+  - questions queue behind an open overlay.
+- Turns: enter sends (alt+enter or ctrl+j for a newline). esc or ctrl+c
+  cancels a running turn with the 5 s grace; ctrl+c on an empty input
+  quits.
+- Usage line: context used/size with a percentage, tokens per turn, cost,
+  and "capture off" when the desktop holds the store.
+- Error and disconnect: a disconnect shows the exit status and stderr
+  tail. ctrl+r relaunches the agent and reopens the session (load or
+  resume); ctrl+n starts a new session in the same process (`Agent.Rehost`).
+- The bridge from the session to the program is one ordered, unbounded
+  queue, so the ACP serial queue never waits on the screen. Session modes
+  and config are now locked (the agent's queue writes, the screen reads).
+- Tests: diff format; a fake driver covers streaming, cards, diff,
+  terminal, plan, usage, the permission choice and withdrawal, an
+  elicitation form with typed content, URL completion, slash completion,
+  the mode and model pickers, the session list, resume, cancel, disconnect
+  and restart, and attach gating. `-race` is clean.
+
+Verified live: one full interactive `atlas run claude-acp` session through
+a real pty (`expect`, 130×45), in `~/Codes/atlas-test-cloud`:
+
+1. A prompt to write `tui-notes.md`. Claude's own permission options
+   appeared ("Yes" / "Yes, allow all edits during this session" / "No").
+   "allow once" was picked; the card went pending → completed with its
+   diff; the file was written.
+2. The usage line read `context 31.2k/1.0M (3%) · tokens in 4 · out 110 ·
+   0.15 USD`, and the agent's title arrived as a notice.
+3. The mode picker listed Claude's five modes (Manual, Accept edits, Plan,
+   Auto, Bypass permissions), and the model picker its model list.
+4. A follow-up question was answered in turn 2. ctrl+l listed five earlier
+   sessions from `session/list`. ctrl+c quit.
+
+Capture: one session with two completed turns, the Write call, file touch
+`tui-notes.md`, usage plus gauges, all `sent`. Memory: `session_start`,
+`file_changed`, `session_end`. The run file was removed on exit.
+
+Not yet verified live: elicitation (no installed agent sent one), image
+attach (claude-agent-acp advertises images, but no image was sent), and
+restart after a real crash. A killed process (SIGKILL) leaves its turn
+open, as on the desktop.
+
+## Phase 9 — finish
+
+- **Checkpoint rewrites** (`internal/capture/git/reconcile.go`), run by every
+  link before the walk, deferred mid rebase, cherry-pick or merge:
+  - reachability via `merge-base --is-ancestor`, then
+    `for-each-ref --contains`, then `cat-file -e` (gone, or the probe failed);
+  - an unreachable linked checkpoint with a patch-id is relinked to the one
+    commit in `rev-list --all --max-count 200` with the same patch-id. When
+    several match, the one on its recorded branch wins; otherwise it is
+    orphaned (row kept). A relink onto an existing (session, commit) row
+    is absorbed;
+  - an orphan that becomes reachable again is recovered;
+  - every change resyncs `sent → pending`;
+  - `workspace_cursor.reconcile_note` gets `{"orphaned","relinked","failed","at"}`;
+  - `atlas capture link` reports rewrites.
+
+  Test: amend → relinked, reset away → orphaned plus the note, reset back
+  → recovered.
+- **`atlas status`**: account, org, Project and binding, gates, recorder,
+  sessions (needing attention, turns left open), commits (cursor,
+  recovered, orphaned checkpoints), sync (drain state; sent, pending and
+  failed counts; a hint for retry and for 403), the memory record (entry
+  count, chain check, "this machine only"), installed agents.
+- **Memory browser**: `atlas memory browse` (Bubble Tea; kinds as tabs,
+  `/` search, an entry with its evidence, `h` for revision history; read
+  only) and `atlas memory list [--kind] [--search]` for scripts.
+- **`atlas agents check [agent…|--all]`**: installs into the cache without
+  touching the installed map, launches, runs `initialize`, tries
+  `session/new` in an empty scratch dir, and reports the agent's info,
+  protocol, capabilities, sign-in methods and the session outcome.
+- **Sign-in for `agent`-kind methods**: the check showed cline,
+  codebuddy-code, codex-acp and corust-agent offer only methods where the
+  agent runs its own flow inside `authenticate`. Those are now
+  authenticated directly (terminal methods still run their login command
+  first). With several usable methods, the user picks on a terminal.
+  Env-var methods are listed, never set.
+- **Release**:
+  - `.goreleaser.yaml`: linux/amd64, linux/arm64, darwin/arm64,
+    `CGO_ENABLED=0`, `-X main.version={{ .Version }}`, tar.gz archives,
+    sha256 `checksums.txt`, a draft GitHub release with `install.sh`
+    attached;
+  - `.github/workflows/release.yml`: on a `v*` tag, tests, then GoReleaser;
+  - CI now also runs on pushes to `feat/**`;
+  - `install.sh` (os/arch detection, latest tag or `ATLAS_VERSION`, sha256
+    verification, `~/.local/bin`; refuses an Intel Mac, which has no v1
+    build);
+  - `make release-check` and `make snapshot`; `docs/RELEASE.md` with the
+    procedure and four acceptance checklists (CLI smoke, cloud sync,
+    desktop parity, agents).
+
+  Verified locally: `goreleaser check` passes. The snapshot built all three
+  archives and its `go mod tidy -diff` hook caught an untidy `go.sum`,
+  since fixed. The linux/amd64 binary is static, `CGO_ENABLED=0`, and carries
+  the version. `install.sh` against the snapshot installed it, refused a
+  tampered checksum, and refused this Intel Mac with a clear message.
+- **`atlas agents check --all`, every registry agent with a build for
+  darwin-x86_64 (38 of 41)**: every one was installed for real (npx and
+  binary archives) and launched.
+  - **18 open a session at once**: amp-acp, claude-acp, codex-acp,
+    cortex-code, crow-cli (34 s initialize and 28 s session/new when run
+    alone; it timed out in the batch while competing for CPU), cursor,
+    deepagents, devin, dirac, gemini, github-copilot-cli, glm-acp-agent,
+    kilo, nova, opencode, sigit, stakpak, vtcode.
+  - **15 answer `initialize` and need a sign-in** (AuthRequired on
+    session/new): auggie, autohand, cline, codebuddy-code, corust-agent,
+    dimcode, factory-droid, grok-build, junie, kimchi, minimax-code,
+    mistral-vibe, poolside, qoder, qwen-code.
+  - **5 fail on the agent's side**, none fixable without per-agent code:
+    - agoragentic-acp answers `session/new` with `-32601 Method not found`
+      (an MCP tool, not a coding agent);
+    - antigravity-acp (darwin-x86_64 Mach-O) never answers `initialize`
+      and writes nothing to stderr in 150 s;
+    - goose answers `session/new` with a bare `-32603` (no details) until
+      its provider is configured, instead of AuthRequired;
+    - harn refuses `session/new` without a non-standard `environmentPolicy`
+      parameter;
+    - pi-acp needs the separate `pi` CLI installed ("executable not
+      found").
+  - **3 have no darwin-x86_64 build**: fast-agent, kimi, minion-code.
+- Bugs found by the check and fixed:
+  - **npm `bin` entries that are native executables** (factory-droid,
+    grok-build) were run as `node <bin>` and died with a SyntaxError. A
+    native binary (ELF/Mach-O) or a non-node `#!` script now runs
+    directly; JavaScript still runs with the managed node. evidence-acp.md
+    §1.4(c) says the command is always `node <executable>`, so the desktop
+    likely has the same failure. Please check `node.rs:548-587` and
+    `servers.rs:517-534`.
+  - **The agent's stderr was lost on exit**: `exec.Cmd.Wait` closes the
+    pipes it creates once the process exits. The CLI now uses its own
+    `os.Pipe`s, so stderr and the final stdout are read to EOF. Test
+    included.
+  - Binary install directories were `0700` (the staging dir from
+    `MkdirTemp`); now `0755`.

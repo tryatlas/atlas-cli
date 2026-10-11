@@ -5,7 +5,7 @@ BIN     := bin/atlas
 # Pure Go: no cgo anywhere (SQLite is modernc.org/sqlite).
 export CGO_ENABLED := 0
 
-.PHONY: all build test lint fmt tidy clean
+.PHONY: all build test lint fmt tidy clean snapshot release-check
 
 all: fmt lint test build
 
@@ -26,3 +26,12 @@ tidy:
 
 clean:
 	rm -rf bin
+
+# The release archives and checksums, locally, without publishing.
+GORELEASER ?= go run github.com/goreleaser/goreleaser/v2@v2.18.3
+
+snapshot:
+	$(GORELEASER) release --snapshot --clean
+
+release-check:
+	$(GORELEASER) check

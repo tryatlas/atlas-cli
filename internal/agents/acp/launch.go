@@ -154,15 +154,26 @@ func Spawn(c Command, dir string) (*Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
+	// Our own pipes, not StdoutPipe/StderrPipe: Wait closes those as soon as
+	// the process exits, losing the last stdout messages and the stderr that
+	// explains the exit.
+	stdout, outW, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
-	stderr, err := cmd.StderrPipe()
+	stderr, errW, err := os.Pipe()
 	if err != nil {
+		_ = stdout.Close()
+		_ = outW.Close()
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
+	cmd.Stdout, cmd.Stderr = outW, errW
+	err = cmd.Start()
+	_ = outW.Close()
+	_ = errW.Close()
+	if err != nil {
+		_ = stdout.Close()
+		_ = stderr.Close()
 		return nil, err
 	}
 	p := &Process{cmd: cmd, Stdin: stdin, Stdout: stdout, exited: make(chan struct{}), drained: make(chan struct{})}
@@ -177,6 +188,7 @@ func Spawn(c Command, dir string) (*Process, error) {
 			}
 			p.mu.Unlock()
 		}
+		_ = stderr.Close()
 		close(p.drained)
 	}()
 	go func() {

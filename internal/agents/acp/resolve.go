@@ -69,9 +69,12 @@ func (r *Resolver) Resolve(ctx context.Context, id string, inst *Installed, reg 
 		if err != nil {
 			return Command{}, err
 		}
+		env := layer(r.Node.CommandEnv(), d.Env, extraEnv, inst.Env)
+		if in.Native {
+			return Command{Path: in.Executable, Args: append(append([]string{}, d.Args...), extraArgs...), Env: env}, nil
+		}
 		args := append([]string{in.Executable}, d.Args...)
-		return Command{Path: r.Node.Bin(), Args: append(args, extraArgs...),
-			Env: layer(r.Node.CommandEnv(), d.Env, extraEnv, inst.Env)}, nil
+		return Command{Path: r.Node.Bin(), Args: append(args, extraArgs...), Env: env}, nil
 	}
 	return Command{}, fmt.Errorf("%s does not run on %s", id, PlatformKey())
 }

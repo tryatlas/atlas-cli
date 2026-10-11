@@ -25,6 +25,7 @@ func TestMain(m *testing.M) {
 // wantCommands is the full command surface from SPEC §1.1, §3.7, §4.4, §5.5,
 // §6.7, §7.4–7.6 and §8, plus D13's memory export/import and verify.
 var wantCommands = []string{
+	"agents check",
 	"agents detect",
 	"agents install",
 	"agents list",
@@ -39,10 +40,12 @@ var wantCommands = []string{
 	"login",
 	"logout",
 	"mcp-bridge",
+	"memory browse",
 	"memory disable",
 	"memory enable",
 	"memory export",
 	"memory import",
+	"memory list",
 	"memory verify",
 	"org create",
 	"org list",
@@ -75,8 +78,8 @@ var implemented = map[string]bool{
 	"init": true, "status": true, "memory enable": true, "memory disable": true,
 	"capture enable": true, "capture disable": true,
 	"memory verify": true, "memory export": true, "memory import": true, "mcp-bridge": true, "serve": true,
-	"capture link": true, "capture sync": true, "capture retry": true, "run": true,
-	"agents detect": true, "agents install": true, "agents list": true, "agents logout": true, "agents uninstall": true,
+	"capture link": true, "capture sync": true, "capture retry": true, "run": true, "memory browse": true, "memory list": true,
+	"agents check": true, "agents detect": true, "agents install": true, "agents list": true, "agents logout": true, "agents uninstall": true,
 }
 
 func TestStubsReportNotImplemented(t *testing.T) {

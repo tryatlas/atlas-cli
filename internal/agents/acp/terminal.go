@@ -106,7 +106,7 @@ func (ts *terminals) create(ctx context.Context, params json.RawMessage) (any, *
 	line := strings.TrimSpace(p.Command + " " + strings.Join(p.Args, " "))
 	title := "Run `" + line + "` in " + dir
 	toolCall, _ := json.Marshal(map[string]any{"toolCallId": "terminal-" + newUUID(), "title": title, "kind": "execute"})
-	id, ok := ts.a.host.Permission(ctx, PermissionRequest{SessionID: p.SessionID, ToolCall: toolCall, Options: []PermissionOption{
+	id, ok := ts.a.hostNow().Permission(ctx, PermissionRequest{SessionID: p.SessionID, ToolCall: toolCall, Options: []PermissionOption{
 		{OptionID: "allow_once", Name: "Allow", Kind: "allow_once"},
 		{OptionID: "reject_once", Name: "Reject", Kind: "reject_once"},
 	}})
@@ -234,4 +234,18 @@ func (ts *terminals) releaseAll() {
 		t.killGroup()
 		delete(ts.m, id)
 	}
+}
+
+// TerminalOutput is a client-side terminal's buffered output ("" when the
+// id is unknown).
+func (a *Agent) TerminalOutput(id string) string {
+	a.terms.mu.Lock()
+	t := a.terms.m[id]
+	a.terms.mu.Unlock()
+	if t == nil {
+		return ""
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return string(t.buf)
 }

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // ErrCancelled is returned when the user leaves a prompt without choosing.
@@ -26,9 +25,9 @@ func isTerminal(f *os.File) bool {
 }
 
 var (
-	titleStyle  = lipgloss.NewStyle().Bold(true)
-	cursorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
-	hintStyle   = lipgloss.NewStyle().Faint(true)
+	titleStyle  = Default.Title
+	cursorStyle = Default.Cursor
+	hintStyle   = Default.Hint
 )
 
 // selectModel is a single-choice list.
