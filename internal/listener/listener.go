@@ -1,8 +1,10 @@
-// Package listener runs a Project's listener for atlas run and atlas serve:
+// Package listener runs a Project's listener for atlas serve (and atlas run):
 // the shared-memory MCP server on a loopback HTTP port, reached by agents
 // through the per-session bearer handed out on session/new (ADR-0009), and an
-// owner-only Unix socket that carries the sync control endpoint for
-// atlas capture sync and retry. Both are published in .atlas/cli-run.json.
+// owner-only Unix socket that carries the control endpoints: /sync for
+// atlas capture sync and retry, /hook for turns delivered by agent hooks, and
+// /mcp for the memory bridge of agents run in their own UIs (ADR-0013). Both
+// are published in .atlas/cli-run.json.
 package listener
 
 import (
@@ -15,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -59,8 +62,22 @@ type Syncer interface {
 
 // SyncRequest is the body of POST /sync.
 type SyncRequest struct {
-	Retry bool `json:"retry"`
+	Retry  bool `json:"retry"`
+	Import bool `json:"import"` // also import native-UI sessions now
+	Link   bool `json:"link"`   // also link captured sessions to new commits now
 }
+
+// Importer is the native-session import loop of atlas serve.
+type Importer interface {
+	ImportNow()
+}
+
+// HookSink receives one hook delivery (ADR-0013): the JSON body of
+// POST /hook, decoded by the owner of the recorder.
+type HookSink func(ctx context.Context, body []byte) error
+
+// Linker links captured sessions to commits on request.
+type Linker func(ctx context.Context) error
 
 // SyncAnswer is its answer.
 type SyncAnswer struct {
@@ -81,10 +98,22 @@ type Listener struct {
 	Memory *server.Server
 	Tokens *server.Tokens
 
-	control *http.Server
-	tcp     *http.Server
-	done    chan struct{}
+	control  *http.Server
+	tcp      *http.Server
+	done     chan struct{}
+	importer atomic.Value // Importer, set once atlas serve starts its loop
+	hooks    atomic.Value // HookSink
+	linker   atomic.Value // Linker
 }
+
+// SetImporter attaches the import loop after the listener started.
+func (l *Listener) SetImporter(im Importer) { l.importer.Store(im) }
+
+// SetHookSink attaches the receiver of hook deliveries.
+func (l *Listener) SetHookSink(s HookSink) { l.hooks.Store(s) }
+
+// SetLinker attaches the commit linker.
+func (l *Listener) SetLinker(fn Linker) { l.linker.Store(fn) }
 
 // Start binds the control socket and the loopback port and starts serving.
 func Start(root, version string, opt Options) (*Listener, error) {
@@ -104,7 +133,21 @@ func Start(root, version string, opt Options) (*Listener, error) {
 		done: make(chan struct{})}
 
 	ctl := http.NewServeMux()
-	ctl.HandleFunc("/sync", syncHandler(opt.Sync))
+	ctl.HandleFunc("/sync", syncHandler(opt.Sync, &ln.importer, &ln.linker))
+	ctl.HandleFunc("/hook", hookHandler(&ln.hooks))
+	// Memory over the owner-only socket: the peer is this user, so the grant
+	// is whatever the caller says it is (the mcp-bridge of a native UI).
+	ctl.Handle("/mcp", server.NewHTTPHandler(mem, func(r *http.Request) (server.Grant, bool) {
+		q := r.URL.Query()
+		if q.Get("agent") == "" {
+			return server.Grant{}, false
+		}
+		cwd := q.Get("cwd")
+		if cwd == "" {
+			cwd = root
+		}
+		return server.Grant{SessionID: q.Get("session"), Agent: q.Get("agent"), Cwd: cwd}, true
+	}))
 	ln.control = &http.Server{Handler: ctl, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		_ = ln.control.Serve(ul)
@@ -150,7 +193,7 @@ func (l *Listener) Stop() error {
 	return err
 }
 
-func syncHandler(s Syncer) http.HandlerFunc {
+func syncHandler(s Syncer, im, lk *atomic.Value) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -171,8 +214,44 @@ func syncHandler(s Syncer) http.HandlerFunc {
 			}
 			ans.Requeued = n
 		}
+		if v, ok := im.Load().(Importer); req.Import && ok {
+			v.ImportNow()
+		}
+		if v, ok := lk.Load().(Linker); req.Link && ok {
+			if err := v(r.Context()); err != nil {
+				http.Error(w, "link failed", http.StatusInternalServerError)
+				return
+			}
+		}
 		s.Force()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(ans)
+	}
+}
+
+// maxHookBody bounds one hook delivery (a turn's transcript slice).
+const maxHookBody = 64 << 20
+
+func hookHandler(sink *atomic.Value) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		fn, ok := sink.Load().(HookSink)
+		if !ok {
+			http.Error(w, "this listener does not record", http.StatusConflict)
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxHookBody))
+		if err != nil {
+			http.Error(w, "unreadable body", http.StatusBadRequest)
+			return
+		}
+		if err := fn(r.Context(), body); err != nil {
+			http.Error(w, "delivery failed", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 	}
 }

@@ -560,3 +560,127 @@ func (r *Recorder) Gauge(ctx context.Context, s Session, used, size *int64) erro
 	}
 	return r.Store.RecordUsage(ctx, l.id, l.turn, nil, store.TokenTotals{ContextUsed: used, ContextSize: size}, r.Now())
 }
+
+// ── Imports (a session replayed with session/load) ──────────────────────────
+
+// ImportedTurn is one turn rebuilt from a replay: the prompt, then the
+// agent's messages and tool calls in order.
+type ImportedTurn struct {
+	Prompt string
+	Items  []ImportedItem
+}
+
+// ImportedItem is a message run or a tool call.
+type ImportedItem struct {
+	NativeID string // message id or tool call id
+	Mode     string // text | thinking ("" for a tool call)
+	Body     string
+	Tool     *Tool
+}
+
+// ImportTurns appends turns after the ones the session already has: the
+// first `skip` turns of the replay are already recorded. A replay carries no
+// file writes, so no file touches are sampled (as for the desktop's imports).
+// It returns how many turns were written.
+func (r *Recorder) ImportTurns(ctx context.Context, s Session, turns []ImportedTurn, at time.Time) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.enabled(ctx) {
+		return 0, nil
+	}
+	l, err := r.session(ctx, s)
+	if err != nil {
+		return 0, err
+	}
+	written := 0
+	for i := int(l.turn); i < len(turns); i++ {
+		t := turns[i]
+		l.turn = int64(i + 1)
+		if err := r.Store.BeginTurn(ctx, l.id, l.turn, at); err != nil {
+			return written, err
+		}
+		stripped := StripUser(t.Prompt)
+		if flat, err := redact.Flat(stripped); err == nil {
+			if title := Title(flat.Text); title != "" {
+				_ = r.Store.SetTitleIfAbsent(ctx, l.id, title)
+			}
+		}
+		if body, ok := r.redactAuto(ctx, l, stripped); ok && strings.TrimSpace(stripped) != "" {
+			if _, err := r.Store.RecordMessage(ctx, store.Message{SessionID: l.id, TurnSeq: l.turn,
+				NativeID: fmt.Sprintf("prompt-%d-%s", l.turn, store.SHA256Hex([]byte(t.Prompt))),
+				Role:     "user", Mode: "text", Body: body, CreatedAt: at}); err != nil {
+				return written, err
+			}
+		}
+		for _, it := range t.Items {
+			if it.Tool != nil {
+				if err := r.importTool(ctx, l, *it.Tool, at); err != nil {
+					return written, err
+				}
+				continue
+			}
+			body := StripAssistant(it.Body)
+			if strings.TrimSpace(body) == "" {
+				continue
+			}
+			red, ok := r.redactAuto(ctx, l, body)
+			if !ok {
+				continue
+			}
+			if _, err := r.Store.RecordMessage(ctx, store.Message{SessionID: l.id, TurnSeq: l.turn, NativeID: it.NativeID,
+				Role: "assistant", Mode: it.Mode, Body: red, CreatedAt: at}); err != nil {
+				return written, err
+			}
+		}
+		if err := r.Store.CompleteTurn(ctx, l.id, l.turn, at); err != nil {
+			return written, err
+		}
+		written++
+	}
+	return written, nil
+}
+
+// importTool writes one replayed tool call, without sampling writes.
+func (r *Recorder) importTool(ctx context.Context, l *live, t Tool, at time.Time) error {
+	name := CanonicalToolName(t.Name, t.Title, t.Kind, t.Arguments)
+	kind := t.Kind
+	if kind == "" {
+		kind = ACPKind(name)
+	}
+	title := t.Title
+	if title == "" {
+		title = t.Name
+	}
+	var args, result *string
+	if a := bytes.TrimSpace(t.Arguments); len(a) > 0 && string(a) != "{}" && string(a) != "null" {
+		red, ok := r.redactAuto(ctx, l, string(a))
+		if !ok {
+			return nil
+		}
+		args = &red
+	}
+	if t.Result != nil {
+		red, ok := r.redactAuto(ctx, l, *t.Result)
+		if !ok {
+			return nil
+		}
+		result = &red
+	}
+	locs := "[]"
+	if len(t.Locations) > 0 {
+		var list []map[string]string
+		for _, p := range t.Locations {
+			list = append(list, map[string]string{"path": p})
+		}
+		b, _ := json.Marshal(list)
+		locs = string(b)
+	}
+	status := t.Status
+	if status == "" || status == "pending" || status == "running" {
+		status = "completed" // a replayed call already ran
+	}
+	_, _, err := r.Store.UpsertToolCall(ctx, store.ToolCall{SessionID: l.id, TurnSeq: l.turn, NativeID: t.NativeID,
+		ToolName: name, Title: opt(title), Kind: opt(kind), Status: status, Locations: locs,
+		Arguments: args, Result: result}, at)
+	return err
+}

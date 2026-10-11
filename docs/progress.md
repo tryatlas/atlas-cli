@@ -1005,3 +1005,173 @@ Still open, needing the user:
 - Published (no longer a draft), now the repository's latest release. Not done:
   merging PR #1, the
   desktop checklist.
+- The repository is now **public**. Verified: `curl -fsSL
+  https://github.com/tryatlas/atlas-cli/releases/latest/download/install.sh | sh`
+  with no GitHub CLI on PATH and no credentials installed `atlas 0.1.0` on
+  this Intel Mac (checksum verified). The `gh` path in `install.sh` remains
+  for forks or mirrors that stay private.
+
+## Native agent UIs (ADR-0012)
+
+The user wants every agent to keep its own TUI. The desktop's stores show it
+already captures terminal sessions of every agent as `source = acp` (only
+Claude Code also comes in as `external_jsonl`). The reference documents the
+backfill (evidence-acp.md:244-245) but not that it writes capture rows.
+
+Probe (new `atlas agents sessions <agent>`): sessions started natively are
+listed over ACP for the folder. `opencode run` gave `ses_ed53e2df…`,
+`claude -p` gave `3ce2e9a2…`, `codex exec` gave `01a12ac2…`.
+
+Built:
+
+- **`atlas capture import [--agent …] [--dry-run]`**:
+  - every installed agent with `sessionCapabilities.list` and `loadSession`
+    is asked for this Project's sessions, and new or changed ones are
+    replayed with `session/load`;
+  - turns are rebuilt from the replay (`run.Turns`: a user message starts a
+    turn; text and thinking runs; tool calls merged across sightings);
+  - they are recorded by `Recorder.ImportTurns`: append-only after the turns
+    already stored, redacted, no file touches, replayed calls marked
+    completed, with `source=acp`, the agent's session id and the registry id;
+  - `.atlas/cli-import.json` records when each session was imported. A
+    session is replayed again only when its `updatedAt` is later, because
+    Claude and Codex bump `updatedAt` on load.
+- **`atlas serve --import-every 1m`** (also passed to `--daemon`) runs the
+  import in the background with one cached connection per agent;
+  `atlas capture import` while a listener runs asks it for a pass now
+  (`/sync` with `"import":true`).
+- Tests: turn rebuilding, append-only import (re-run, then a replay with one
+  more turn), the timestamp rule.
+
+Verified live in `/tmp/native-probe` (local Project):
+
+- first import: claude-acp 1 turn, codex-acp 1, opencode 2 (including its
+  Write tool call); gemini skipped ("cannot list and load its sessions over
+  ACP");
+- re-runs: nothing replayed and nothing written;
+- a new native turn (`claude -p --resume 3ce2e9a2…`) → the next import
+  captured exactly that turn as turn 2;
+- `atlas serve --daemon --import-every 15s`, then a native `opencode run`
+  while the daemon held its own OpenCode connection: captured within one
+  pass, prompt and reply, with no command run by hand.
+
+Open, needing the user:
+
+- **Shared memory in native UIs** needs each agent's MCP config written
+  (`.mcp.json`, `.codex/config.toml`, `opencode.json`, …): one writer per
+  agent (parked D5).
+- Imported sessions have no file touches, so no checkpoints.
+
+### Which agents work with native-UI capture (tested 2026-10-11)
+
+Method: in a fresh local Project, run the agent's own CLI non-interactively
+with a one-line prompt, then check `atlas agents sessions <agent>` and
+`atlas capture import --agent <agent>`.
+
+| result | agents |
+|---|---|
+| ✅ native session listed over ACP and imported | claude-acp (`claude -p`), codex-acp (`codex exec`), opencode (`opencode run`), kilo (`kilo run`), github-copilot-cli (`copilot -p`) |
+| ❌ native session ran but is not listed | cursor (`cursor-agent -p --trust --model auto` answered; `session/list`, also without the folder filter, shows only older sessions, the newest from 2026-08-22) |
+| ❌ cannot list sessions over ACP | gemini, amp, cline, codebuddy-code, crow-cli, deepagents, dirac, stakpak, vtcode, corust-agent, agoragentic-acp |
+| — no native UI (ACP-only binaries) | glm-acp-agent, sigit |
+| — could not test: setup or account needed | cortex-code (Snowflake connection), devin (login), nova (`compass setup` consent), and every agent that answered "sign-in required" in the check: auggie, autohand, dimcode, factory-droid, grok-build, harn, junie, kimchi, minimax-code, mistral-vibe, pi-acp, poolside, qoder, qwen-code, goose |
+| — does not start | antigravity-acp |
+
+`atlas agents sessions` gained `--all-folders` and prints each session's
+cwd. Kilo, GitHub Copilot and Cursor are now in the installed map (needed
+for import).
+
+## 2026-10-12: direction change, research on the Entire CLI
+
+The user decided to drop ACP as the capture path and copy how
+`github.com/entireio/cli` works: hooks installed into each agent's own
+config, the agent's transcript read from the hook-named path at turn end,
+Entire's eight agents (Claude Code, Codex, Cursor, Copilot CLI, Factory
+Droid, Antigravity, OpenCode, Pi), with the Atlas product on top (init,
+Project, store, cloud sync, shared memory). Full research, per-agent hook
+and transcript facts, and the proposed ADR-0013 decisions are in
+`docs/research/entire-cli.md`. Nothing is implemented yet; the ACP
+native-import work (ADR-0012) is still uncommitted and would be parked.
+
+Decisions still needed from the user: the narrowed transcript-file rule,
+storage (Atlas store + cloud, not git refs), and parking ACP.
+
+## Hook-based capture of native agent UIs (ADR-0013, 2026-10-12)
+
+The product changed direction: agents run in their own UIs and Atlas captures
+them through their hooks, the way the Entire CLI does
+(`docs/research/entire-cli.md`), with the Atlas store, cloud sync and shared
+memory on top. ACP is parked under the hidden `atlas acp` group.
+
+Built:
+
+- `internal/hooks`: the framework. `Event`/`Kind`, the `Agent` and `Reader`
+  interfaces, a registry, the `sh -c 'command -v atlas … exec atlas hooks …'`
+  wrapper with ownership by the `atlas hooks ` prefix, the Claude-shaped
+  settings editor (raw-map merge, stale-entry pruning, 0600 atomic writes),
+  JSONL helpers, per-session state under `.atlas/hooks/<agent>/<id>.json`,
+  the dispatcher (SessionStart banner; TurnStart snapshots git status and
+  the transcript offset; TurnEnd reads the transcript from the offset,
+  diffs git status, attributes unexplained changes to the turn's last shell
+  call), delivery (direct under the writer lock → the running listener's
+  Unix socket `/hook` → the spool when the desktop holds the store, drained
+  by the next writer), the git `post-commit` hook (chains an existing hook
+  as `<hook>.pre-atlas`), and `mcpconfig` writers that put the
+  `atlas_memory` stdio entry (`atlas mcp-bridge --project … --agent …`) into
+  each agent's MCP config.
+- `record.RecordTurn`: a whole captured turn into the store (prompt and
+  title, runs, tool calls with sampled writes and edit patches, unexplained
+  file touches, usage, turn rows), everything through the redactor.
+- `listener`: `/hook` (sink set by `atlas serve`), `/mcp` over the
+  owner-only socket for the bridge, `Link` on `/sync`.
+- `atlas mcp-bridge --project --agent`: forwards to a running listener over
+  the socket, else serves memory in-process (memory works without
+  `atlas serve`).
+- Commands: `atlas agents add|remove|list|sessions`, hidden
+  `atlas hooks <agent> <verb>` and `atlas hooks git post-commit`,
+  `atlas status` Agents/Hooks/Hook err lines.
+- Agents: Claude Code (`.claude/settings.local.json`, six hooks, JSONL
+  reader with the Stop flush sentinel, usage deduped by message id);
+  Codex, Cursor, Copilot CLI, OpenCode, Factory Droid, Antigravity and Pi
+  from the research facts (see each package's doc comment).
+
+Verified live on this Mac (Claude Code 2.1.296, `/tmp/hooks-claude`):
+
+- `atlas init --local`, `atlas agents add claude-code`: hooks and
+  `.mcp.json` written, git hook installed.
+- `claude -p "Create hello.txt …"`: the session row (model, title), the
+  prompt, the reply, the `Write` call with arguments, the file touch with
+  its sha256 and sketch, the edit patch, usage (4 in / 129 out / 39 576
+  cache read), the turn completed; `file_changed` in shared memory.
+- `git commit`: the post-commit hook linked the checkpoint (`linked`),
+  `atlas status` says "Commits: linked up to <sha>".
+- `atlas mcp-bridge --project … --agent claude-code` over stdio:
+  `initialize` and `memory_briefing` answered, listing the hooked turn's
+  file.
+- `atlas serve --daemon` then a second `claude -p` turn: delivered through
+  the socket; `atlas agents sessions` lists both sessions with
+  `claude -r <id>`.
+
+Known gaps (recorded, not hidden):
+
+- Subagent hooks are not installed (their file changes still land through
+  the git status diff, attributed to the parent turn).
+- Compaction only marks state; the transcript offset is not reset.
+- A turn that ran only shell commands with no tool call in the transcript
+  gets a synthetic "Changes observed during the turn" call for its touches.
+- Cursor's CLI sends no transcript path; the path is derived from the
+  payload's own conversation id (the one allowed exception, documented in
+  the package).
+
+### Per-agent live results (2026-10-12, this Mac)
+
+| agent | result |
+|---|---|
+| claude-code (2.1.296) | ✅ `claude -p` and the interactive TUI (driven through a pty): the SessionStart banner "Atlas: capture on · memory on · local Project" shows; session, prompt, reply, `Read`/`Edit`/`Write` calls, file touches with sha, edit patch, usage, memory `file_changed`; the post-commit hook linked the checkpoint; a turn through `atlas serve`'s socket; `claude -r <id>` listed. Test artefact worth knowing: a `claude` started from inside another Claude Code session inherits `CLAUDE_CODE_CHILD_SESSION` and writes no transcript ("Transcript saving is off"); the hook then records the prompt and file changes only and logs it once |
+| codex (0.153.4) | ✅ after trust: `codex exec -s workspace-write`: prompt, two replies, `Edit` (the code-mode `tools.apply_patch(...)` script is decoded into the patch and its files), two `Bash`, file touch, usage (17 120 / 270 / 45 312 cached). The first interactive `codex` shows "Hooks need review · 5 hooks are new or changed"; **Trust all and continue** writes `[hooks.state."<hooks.json>:<event>:0:0"] trusted_hash` records; `codex exec` cannot ask. Root cause of the first failure: Codex prepends `~/.local/bin` to the hook's PATH, where the released 0.1.0 `atlas` sat; it has no `hooks` command. The current build is installed there now |
+| copilot (1.0.95) | ✅ after trust: `copilot -p --allow-all-tools` in a trusted folder: prompt, reply, `Edit` (apply_patch) with the file touch, an `Other` call for `atlas_memory-memory_briefing` (the memory server was loaded and used), usage matching Copilot's footer (47.6k ↑, 99 ↓, 36 reasoning). Copilot loads `.github/hooks/*.json` and `.github/mcp.json` only from a trusted folder: the first interactive `copilot` asks ("This and future sessions"), `copilot -p` never does; `COPILOT_ALLOW_ALL=true` also trusts. 1.0.95's transcript puts usage in `session.usage_record` and file edits in `fileEdits`; the reader handles both and the older shapes |
+| opencode (1.19.0) | ✅ `opencode run`: prompt, two thinking runs, reply, four tool calls (`Search`, `Write`, `Read`, one `Other`), the file touch, usage; the memory server loaded (the agent's own thinking mentions the memory briefing). `opencode run` never sends session-end, so the session stays "idle" until Sweep. OpenCode writes `.opencode/package.json`, `node_modules/` on first start |
+| pi (1.1.0, OpenAI key) | ✅ `pi --approve --model gpt-4.1-mini -p …`: prompt, reply, `Write`/`Read`/`Bash` calls, file touches (`note.txt`, `hi.txt`), usage incl. reasoning; `pi mcp list` shows `atlas_memory: connected, 10 tools`. Pi loads the extension and `.pi/mcp.json` only for a trusted project (`--approve` per run, or the interactive "Trust project folder?" prompt → `~/.pi/agent/trust.json`) |
+| droid (0.238.0) | ⚠️ hooks fire (session-start, user-prompt-submit, session-end state recorded, transcript path resolved) but the agent itself refused: "Authentication failed. Please log in using /login or set FACTORY_API_KEY". Needs the user's Factory sign-in to finish the test |
+| cursor (CLI 2026.10.01, Free plan, `--model auto`) | ✅ interactive TUI (pty): sessionStart (fires at the first prompt, not at launch), beforeSubmitPrompt, stop with tokens, sessionEnd (~11 s after `/exit`); prompt, two replies, `Write` and `Bash` calls, file touches, usage (15 787 / 215 / 15 488 cached). The CLI writes the nested transcript path and names it only from the first tool hook on; `model` is always "default" (recorded as `auto`); `stop.status: error` marks the turn failed. `cursor-agent -p` fires no prompt/stop hooks at all, so a `-p` session is captured as one turn at sessionEnd from its transcript. Cursor runs hooks through the login shell, so `~/.local/bin/atlas` must be current. The TUI asks to approve the `atlas_memory` MCP server once (or `--approve-mcps`) |
+| antigravity (`agy` 1.3.3, Gemini API key, installed under a temp HOME) | ✅ `agy -p … --add-dir <abs> --dangerously-skip-permissions`: prompt, thinking, reply, `Write` (`write_to_file`) with the file touch, usage (per-step token fields, matching agy's own total). PreInvocation, PreToolUse and Stop fire; on 1.3.3 the transcript is written incrementally (the user step lands before PreInvocation, so the reader's position stops at the last model step). Found and fixed a bridge bug: agy's MCP client sends `server/discover` before `initialize` and hung on our silent 404; the bridge now answers -32601 and agy falls back to `initialize`. Without the skip-permissions flag a headless write is auto-denied and the Stop hook does not fire, leaving the session "in a turn" until Sweep |

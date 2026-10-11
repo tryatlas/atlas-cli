@@ -52,22 +52,22 @@ Run them before tagging. Record the results in `docs/progress.md`.
 | 1 | `atlas --version` | The tag's version |
 | 2 | `atlas login`, then `atlas whoami` | Signed in; organisations listed |
 | 3 | In a scratch git repo: `atlas init --local`, then `atlas status` | Project, gates on, "Sync: off (local Project)", "Record: … this machine only" |
-| 4 | `atlas agents list` | The registry, nothing installed on a fresh machine |
-| 5 | `atlas agents check claude-acp` | protocol 1, `session: ok` or `sign-in required`, the sign-in methods |
-| 6 | `atlas run claude-acp --no-tui --yes --prompt "Create hello.md with one line"` | The reply is printed; `hello.md` exists |
-| 7 | `atlas run claude-acp` (chat screen): a prompt that edits a file, then ctrl+t, ctrl+p, ctrl+l, ctrl+c | Permission prompt with the agent's own options; a tool card with its diff; the mode and model pickers; the session list; a clean exit |
-| 8 | `atlas memory browse` and `atlas memory list` | The entries the agent wrote (file_changed, any decision) |
-| 9 | Commit the file, then `atlas capture link` | "1 checkpoint(s) written" |
+| 4 | `atlas agents list` | The eight agents; hook and memory "absent"; binaries on PATH named |
+| 5 | `atlas agents add claude-code` | "hook installed, memory server added to .mcp.json"; the git post-commit hook installed; `.claude/settings.local.json` holds six Atlas hooks |
+| 6 | `claude -p "Create hello.md with one line"` | The reply; `hello.md` exists; `atlas status` shows 1 session; `atlas agents sessions` lists it with `claude -r <id>` |
+| 7 | `claude` (its own UI): a prompt that edits a file, then exit | The SessionStart banner "Atlas: capture on · memory on · …"; a second turn in the store with the tool call and the file touch |
+| 8 | `atlas memory list` | `file_changed` entries from both turns |
+| 9 | Commit the file | The post-commit hook links it: `atlas status` says "Commits: linked up to <sha>" without running `atlas capture link` |
 | 10 | `git commit --amend -m reworded`, then `atlas capture link` | "Rewritten history: 1 relinked" |
-| 11 | `atlas status` | Sessions, "Commits: linked up to <sha>", agents listed |
-| 12 | `atlas serve --daemon`, `atlas status` (recorder held), `atlas serve --stop` | Starts, held, stops |
+| 11 | `atlas serve --daemon`, one more `claude -p` turn, `atlas serve --stop` | The turn is recorded through the listener (no hook error in `atlas status`) |
+| 12 | `atlas agents remove claude-code` | Hooks and the memory entry gone; the git hook gone when no agent is left |
 
 ### B. Cloud sync (a throwaway cloud Project)
 
 | # | Step | Expect |
 |---|---|---|
 | 1 | `atlas init --org <id> --create --slug cli-acceptance-<date> --yes` | Bound, "cloud: <org> / <slug>" |
-| 2 | One `atlas run … --prompt` that edits a file; commit; `atlas capture link` | — |
+| 2 | One `claude -p` (or any hooked agent) turn that edits a file; commit | — |
 | 3 | `atlas capture sync`, then `atlas status` | "Sync: ok · N sent, 0 pending, 0 failed" |
 | 4 | Open the Project in the web app or a teammate's desktop | The session with its tool calls, and the checkpoint |
 
@@ -80,7 +80,9 @@ cloud Timeline).
 
 ### D. Agents
 
-`atlas agents check --all` on each release platform. Every agent with a
-build for the platform must install, launch and answer `initialize`. A
-failure is either an agent problem (recorded in `docs/progress.md` with its
-wire evidence, `ATLAS_ACP_TRACE`) or a CLI bug (fixed before the tag).
+`atlas agents add <agent>` then one turn in each agent's own UI, on each
+release platform, for every agent installed on the machine. The turn must
+land in `atlas status` with its tool calls and file touches, and `atlas
+agents sessions` must print a resume command that works. A failure is either
+an agent problem (recorded in `docs/progress.md` with the payload shape) or
+a CLI bug (fixed before the tag).

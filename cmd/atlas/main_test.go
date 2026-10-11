@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tryatlas/atlas-cli/internal/auth"
+	"github.com/tryatlas/atlas-cli/internal/hooks"
 )
 
 // TestMain keeps every command test away from the real session file and the
@@ -25,17 +26,25 @@ func TestMain(m *testing.M) {
 // wantCommands is the full command surface from SPEC §1.1, §3.7, §4.4, §5.5,
 // §6.7, §7.4–7.6 and §8, plus D13's memory export/import and verify.
 var wantCommands = []string{
-	"agents check",
-	"agents detect",
-	"agents install",
+	"acp check",
+	"acp detect",
+	"acp import",
+	"acp install",
+	"acp list",
+	"acp logout",
+	"acp run",
+	"acp sessions",
+	"acp uninstall",
+	"agents add",
 	"agents list",
-	"agents logout",
-	"agents uninstall",
+	"agents remove",
+	"agents sessions",
 	"capture disable",
 	"capture enable",
 	"capture link",
 	"capture retry",
 	"capture sync",
+	"hooks git post-commit",
 	"init",
 	"login",
 	"logout",
@@ -50,17 +59,32 @@ var wantCommands = []string{
 	"org create",
 	"org list",
 	"org use",
-	"run",
 	"serve",
 	"status",
 	"whoami",
 }
 
+// allCommands is wantCommands plus one hooks entry point per registered
+// agent verb (the integrations declare their own verbs).
+func allCommands() []string {
+	out := append([]string(nil), wantCommands...)
+	for _, a := range hooks.All() {
+		for _, v := range a.Verbs() {
+			out = append(out, "hooks "+a.ID()+" "+v)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 func TestCommandSurface(t *testing.T) {
 	got := commandPaths(newRootCmd())
 	slices.Sort(got)
-	if !slices.Equal(got, wantCommands) {
-		t.Fatalf("command paths differ\n got: %q\nwant: %q", got, wantCommands)
+	if want := allCommands(); !slices.Equal(got, want) {
+		t.Fatalf("command paths differ\n got: %q\nwant: %q", got, want)
+	}
+	if len(hooks.All()) != 8 {
+		t.Fatalf("agents registered = %d, want 8", len(hooks.All()))
 	}
 }
 
@@ -78,13 +102,15 @@ var implemented = map[string]bool{
 	"init": true, "status": true, "memory enable": true, "memory disable": true,
 	"capture enable": true, "capture disable": true,
 	"memory verify": true, "memory export": true, "memory import": true, "mcp-bridge": true, "serve": true,
-	"capture link": true, "capture sync": true, "capture retry": true, "run": true, "memory browse": true, "memory list": true,
-	"agents check": true, "agents detect": true, "agents install": true, "agents list": true, "agents logout": true, "agents uninstall": true,
+	"capture link": true, "capture sync": true, "acp import": true, "capture retry": true, "acp run": true, "memory browse": true, "memory list": true,
+	"acp check": true, "acp detect": true, "acp install": true, "acp list": true, "acp sessions": true, "acp logout": true, "acp uninstall": true,
+	"agents add": true, "agents list": true, "agents remove": true, "agents sessions": true,
+	"hooks git post-commit": true,
 }
 
 func TestStubsReportNotImplemented(t *testing.T) {
 	for _, path := range wantCommands {
-		if implemented[path] {
+		if implemented[path] || strings.HasPrefix(path, "hooks ") {
 			continue
 		}
 		t.Run(path, func(t *testing.T) {

@@ -4,298 +4,287 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
-	atlasrun "github.com/tryatlas/atlas-cli/internal/run"
+	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/atlas-cli/internal/hooks/mcpconfig"
+	"github.com/tryatlas/atlas-cli/internal/project"
 )
 
+// atlas agents: the agents that run in their own UIs and report to Atlas
+// through their hooks (ADR-0013). add writes the hook into the agent's
+// config in this Project and the atlas_memory entry into its MCP config;
+// remove takes both out; list shows every supported agent's state.
 func newAgentsCmd() *cobra.Command {
-	list := withRun(leaf("list", "List the agent registry: installed and available agents", cobra.NoArgs), runAgentsList)
-	list.Flags().Bool("refresh", false, "fetch the registry now instead of using the hourly cache")
-	install := withRun(leaf("install <agent>", "Install a registry agent (it downloads on first run)", cobra.ExactArgs(1)), runAgentsInstall)
-	install.Flags().Bool("detected", false, "use the copy found on PATH instead of downloading (see atlas agents detect)")
-	uninstall := withRun(leaf("uninstall <agent>", "Remove an installed agent", cobra.ExactArgs(1)), runAgentsUninstall)
-	uninstall.Flags().Bool("purge", false, "also delete its downloaded files")
-	return group("agents", "ACP agents from the registry",
-		list, install, uninstall,
-		withRun(leaf("detect", "Find registry agents already on PATH", cobra.NoArgs), runAgentsDetect),
-		newAgentsCheckCmd(),
-		withRun(leaf("logout <agent>", "Sign the agent out, when it supports it", cobra.ExactArgs(1)), runAgentsLogout),
-	)
+	add := withRun(leaf("add <agent>...", "Install the Atlas hook and memory server into the agent's config in this Project", cobra.MinimumNArgs(1)), runAgentsAdd)
+	add.Flags().Bool("force", false, "rewrite every Atlas entry even when it looks current")
+	add.Flags().Bool("no-memory", false, "install the capture hook only, not the memory server entry")
+	add.Flags().Bool("all", false, "every agent detected on this machine")
+	remove := withRun(leaf("remove <agent>...", "Remove the Atlas hook and memory server entry from the agent's config", cobra.MinimumNArgs(1)), runAgentsRemove)
+	remove.Flags().Bool("all", false, "every agent with an Atlas entry here")
+	list := withRun(leaf("list", "List the supported agents and their state in this Project", cobra.NoArgs), runAgentsList)
+	return group("agents", "Agents run in their own UIs, captured through their hooks", add, remove, list,
+		withRun(leaf("sessions", "List the sessions the hooks have seen in this Project", cobra.NoArgs), runAgentsSessions))
 }
 
-func agentsStore() atlasrun.Agents {
-	return atlasrun.Agents{Version: version, Progress: func(s string) { fmt.Fprintln(os.Stderr, s) }}
+// agentRoot is the Project the agent commands act on.
+func agentRoot(ctx context.Context) (*project.Project, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	p, err := project.Discover(ctx, cwd)
+	if errors.Is(err, project.ErrNotInitialised) {
+		return nil, errNoProject
+	}
+	return p, err
+}
+
+func resolveAgents(args []string, all bool, pick func(hooks.Agent) bool) ([]hooks.Agent, error) {
+	if all {
+		var out []hooks.Agent
+		for _, a := range hooks.All() {
+			if pick(a) {
+				out = append(out, a)
+			}
+		}
+		if len(out) == 0 {
+			return nil, errors.New("no agent matched; atlas agents list shows them")
+		}
+		return out, nil
+	}
+	var out []hooks.Agent
+	for _, id := range args {
+		a, ok := hooks.Get(id)
+		if !ok {
+			return nil, fmt.Errorf("%s is not a supported agent (atlas agents list)", id)
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+func runAgentsAdd(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	out := cmd.OutOrStdout()
+	p, err := agentRoot(ctx)
+	if err != nil {
+		return err
+	}
+	force, _ := cmd.Flags().GetBool("force")
+	noMem, _ := cmd.Flags().GetBool("no-memory")
+	all, _ := cmd.Flags().GetBool("all")
+	agents, err := resolveAgents(args, all, func(a hooks.Agent) bool { return a.Detect(p.Root) })
+	if err != nil {
+		return err
+	}
+	if changed, err := hooks.InstallGitHooks(ctx, p.Root); err != nil {
+		return fmt.Errorf("git hooks: %w", err)
+	} else if changed {
+		fmt.Fprintln(out, "Installed the git post-commit hook (links sessions to commits).")
+	}
+	for _, a := range agents {
+		changed, err := a.Install(p.Root, force)
+		if err != nil {
+			return fmt.Errorf("%s: %w", a.ID(), err)
+		}
+		what := "already installed"
+		if changed {
+			what = "installed"
+		}
+		line := fmt.Sprintf("%s: hook %s", a.Name(), what)
+		if w, ok := mcpconfig.For(a.ID()); ok && !noMem {
+			mchanged, err := w.Write(p.Root)
+			if err != nil {
+				return fmt.Errorf("%s memory config: %w", a.ID(), err)
+			}
+			if mchanged {
+				line += ", memory server added to " + strings.TrimPrefix(w.Path(p.Root), p.Root+"/")
+			} else {
+				line += ", memory server present"
+			}
+		} else if !ok && !noMem {
+			line += " (no memory config writer for this agent yet)"
+		}
+		fmt.Fprintln(out, line)
+		if _, err := exec.LookPath(a.Binary()); err != nil {
+			fmt.Fprintf(out, "  note: %s is not on PATH here\n", a.Binary())
+		}
+		if n, ok := a.(hooks.Noter); ok {
+			fmt.Fprintf(out, "  note: %s\n", n.AddNote())
+		}
+	}
+	fmt.Fprintf(out, "Use the agents as usual in %s; sessions are captured as they run. atlas status shows them.\n", p.Root)
+	return nil
+}
+
+func runAgentsRemove(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	out := cmd.OutOrStdout()
+	p, err := agentRoot(ctx)
+	if err != nil {
+		return err
+	}
+	all, _ := cmd.Flags().GetBool("all")
+	agents, err := resolveAgents(args, all, func(a hooks.Agent) bool { return a.State(p.Root) != hooks.Absent })
+	if err != nil {
+		return err
+	}
+	for _, a := range agents {
+		if err := a.Uninstall(p.Root); err != nil {
+			return fmt.Errorf("%s: %w", a.ID(), err)
+		}
+		if w, ok := mcpconfig.For(a.ID()); ok {
+			if err := w.Remove(p.Root); err != nil {
+				return fmt.Errorf("%s memory config: %w", a.ID(), err)
+			}
+		}
+		fmt.Fprintf(out, "%s: Atlas hook and memory entry removed.\n", a.Name())
+	}
+	left := false
+	for _, a := range hooks.All() {
+		if a.State(p.Root) != hooks.Absent {
+			left = true
+		}
+	}
+	if !left {
+		if err := hooks.UninstallGitHooks(ctx, p.Root); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "No agent left: the git post-commit hook was removed too.")
+	}
+	return nil
 }
 
 func runAgentsList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
-	a := agentsStore()
-	force, _ := cmd.Flags().GetBool("refresh")
-	reg, rerr := a.Catalog(ctx, force)
-	if reg == nil {
-		return rerr
+	root := ""
+	if p, err := agentRoot(ctx); err == nil {
+		root = p.Root
 	}
-	if rerr != nil {
-		fmt.Fprintln(cmd.ErrOrStderr(), "atlas:", rerr)
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "AGENT\tNAME\tBINARY\tHOOK\tMEMORY")
+	for _, a := range hooks.All() {
+		bin := "not on PATH"
+		if _, err := exec.LookPath(a.Binary()); err == nil {
+			bin = a.Binary()
+		}
+		hook, mem := "-", "-"
+		if root != "" {
+			hook = a.State(root).String()
+			if mw, ok := mcpconfig.For(a.ID()); ok {
+				mem = mw.State(root).String()
+			} else {
+				mem = "no writer"
+			}
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.ID(), a.Name(), bin, hook, mem)
 	}
-	inst, _, err := a.Installed()
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if root == "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "Not in an Atlas Project: run atlas init, then atlas agents add <agent>.")
+	}
+	return nil
+}
+
+func runAgentsSessions(cmd *cobra.Command, _ []string) error {
+	p, err := agentRoot(cmd.Context())
 	if err != nil {
 		return err
 	}
+	states, err := hooks.ListStates(p.Root, "")
+	if err != nil {
+		return err
+	}
+	if len(states) == 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "No session seen by the hooks yet.")
+		return nil
+	}
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "AGENT\tVERSION\tSTATE\tNAME")
-	plat := acp.PlatformKey()
-	seen := map[string]bool{}
-	for _, e := range reg.Agents {
-		seen[e.ID] = true
-		state := "available"
+	fmt.Fprintln(w, "AGENT\tSESSION\tTURNS\tSTATE\tLAST\tRESUME")
+	for _, s := range states {
+		state := "idle"
 		switch {
-		case inst[e.ID] != nil && inst[e.ID].Type == acp.TypeCustom:
-			state = "installed (custom)"
-		case inst[e.ID] != nil:
-			state = "installed"
-		case e.KindOn(plat) == acp.KindNone:
-			state = "not for " + plat
+		case s.Ended:
+			state = "ended"
+		case s.InTurn:
+			state = "in a turn"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.ID, e.Version, state, e.Name)
-	}
-	var extra []string
-	for id := range inst {
-		if !seen[id] {
-			extra = append(extra, id)
+		if s.Pending > 0 {
+			state += fmt.Sprintf(", %d spooled", s.Pending)
 		}
-	}
-	sort.Strings(extra)
-	for _, id := range extra {
-		fmt.Fprintf(w, "%s\t-\tinstalled (%s)\t\n", id, inst[id].Type)
+		resume := ""
+		if a, ok := hooks.Get(s.Agent); ok {
+			resume = a.ResumeCommand(s.SessionID)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\n", s.Agent, s.SessionID, s.Turn, state, ago(s.UpdatedAt), resume)
 	}
 	return w.Flush()
 }
 
-// detected maps registry ids to a binary found on PATH: agents with a
-// binary target for this platform whose cmd is not node; npx-only agents
-// are never detected.
-func detected(reg *acp.Registry) map[string]string {
-	out := map[string]string{}
-	plat := acp.PlatformKey()
-	for _, e := range reg.Agents {
-		t, ok := e.Distribution.Binary[plat]
-		if !ok || t.Cmd == "node" {
-			continue
-		}
-		base := filepath.Base(strings.ReplaceAll(t.Cmd, `\`, "/"))
-		if p, err := exec.LookPath(base); err == nil {
-			if abs, err := filepath.Abs(p); err == nil {
-				out[e.ID] = abs
-			}
-		}
-	}
-	return out
-}
-
-func runAgentsDetect(cmd *cobra.Command, _ []string) error {
-	reg, err := agentsStore().Catalog(cmd.Context(), false)
-	if reg == nil {
-		return err
-	}
-	found := detected(reg)
-	if len(found) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No registry agent found on PATH.")
-		return nil
-	}
-	ids := make([]string, 0, len(found))
-	for id := range found {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", id, found[id])
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), "Use one with: atlas agents install <agent> --detected")
-	return nil
-}
-
-func runAgentsInstall(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	a := agentsStore()
-	id := args[0]
-	reg, rerr := a.Catalog(ctx, false)
-	if reg == nil {
-		return rerr
-	}
-	e, ok := reg.Find(id)
-	if !ok {
-		if reg, rerr = a.Catalog(ctx, true); reg == nil {
-			return rerr
-		}
-		if e, ok = reg.Find(id); !ok {
-			return fmt.Errorf("%s: %w (atlas agents list)", id, acp.ErrNotInRegistry)
-		}
-	}
-	if !e.Supported() {
-		return fmt.Errorf("%s does not run on %s", id, acp.PlatformKey())
-	}
-	m, path, err := a.Installed()
-	if err != nil {
-		return err
-	}
-	entry := &acp.Installed{Type: acp.TypeRegistry}
-	if d, _ := cmd.Flags().GetBool("detected"); d {
-		p, ok := detected(reg)[id]
-		if !ok {
-			return fmt.Errorf("%s was not found on PATH", id)
-		}
-		entry = &acp.Installed{Type: acp.TypeCustom, Command: p, Args: e.Distribution.Binary[acp.PlatformKey()].Args}
-	}
-	if prev := m[id]; prev != nil {
-		entry.Env, entry.DefaultMode = prev.Env, prev.DefaultMode
-	}
-	m[id] = entry
-	if err := m.Save(path); err != nil {
-		return err
-	}
-	if entry.Type == acp.TypeCustom {
-		fmt.Fprintf(cmd.OutOrStdout(), "Installed %s from %s: atlas run %s\n", e.Name, entry.Command, id)
-		return nil
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Installed %s %s. It downloads on first run: atlas run %s\n", e.Name, e.Version, id)
-	return nil
-}
-
-func runAgentsUninstall(cmd *cobra.Command, args []string) error {
-	a := agentsStore()
-	id := args[0]
-	m, path, err := a.Installed()
-	if err != nil {
-		return err
-	}
-	if m[id] == nil {
-		return fmt.Errorf("%s: %w", id, acp.ErrNotInstalled)
-	}
-	delete(m, id)
-	if err := m.Save(path); err != nil {
-		return err
-	}
-	if p, _ := cmd.Flags().GetBool("purge"); p {
-		data, err := acp.DataDir()
-		if err == nil {
-			_ = os.RemoveAll(filepath.Join(data, "external-agents", "registry", acp.Sanitize(id)))
-			_ = os.RemoveAll(filepath.Join(data, "external-agents", "registry", "npx", acp.Sanitize(id)))
-		}
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Uninstalled %s.\n", id)
-	return nil
-}
-
-func runAgentsLogout(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	id := args[0]
-	m, _, err := agentsStore().Installed()
-	if err != nil {
-		return err
-	}
-	if m[id] == nil {
-		return fmt.Errorf("%s: %w", id, acp.ErrNotInstalled)
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	ag, _, err := agentsStore().Launch(ctx, id, cwd, nopHost{})
-	if err != nil {
-		return err
-	}
-	defer ag.Close()
-	if err := ag.Logout(ctx); err != nil {
-		return err
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Signed %s out.\n", ag.Name())
-	return nil
-}
-
-// nopHost serves a connection that opens no session.
-type nopHost struct{}
-
-func (nopHost) Update(string, acp.Update) {}
-func (nopHost) Permission(context.Context, acp.PermissionRequest) (string, bool) {
-	return "", false
-}
-func (nopHost) Elicit(context.Context, acp.Elicitation) acp.ElicitationAnswer {
-	return acp.ElicitationAnswer{Action: "cancel"}
-}
-func (nopHost) ElicitationComplete(string) {}
-
-var errNoTUI = errors.New("the chat screen needs a terminal; pass --prompt \"…\" --no-tui to run one prompt")
-
-func newAgentsCheckCmd() *cobra.Command {
-	c := withRun(leaf("check [agent...]", "Install, launch and handshake agents; report capabilities and sign-in", cobra.ArbitraryArgs), runAgentsCheck)
-	c.Flags().Bool("all", false, "check every registry agent that runs on this machine")
-	c.Flags().Duration("timeout", 5*time.Minute, "per-agent limit, download included")
-	return c
-}
-
-func runAgentsCheck(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	a := agentsStore()
-	a.Progress = nil
-	reg, rerr := a.Catalog(ctx, false)
-	if reg == nil {
-		return rerr
-	}
-	all, _ := cmd.Flags().GetBool("all")
-	limit, _ := cmd.Flags().GetDuration("timeout")
-	var entries []acp.Entry
+func ago(t time.Time) string {
+	d := time.Since(t).Round(time.Minute)
 	switch {
-	case all:
-		for _, e := range reg.Agents {
-			if e.Supported() {
-				entries = append(entries, e)
-			}
-		}
-	case len(args) == 0:
-		return errors.New("name agents to check, or pass --all")
-	default:
-		for _, id := range args {
-			e, ok := reg.Find(id)
-			if !ok {
-				return fmt.Errorf("%s: %w", id, acp.ErrNotInRegistry)
-			}
-			entries = append(entries, e)
-		}
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	}
-	w := cmd.OutOrStdout()
-	failed := 0
-	for _, e := range entries {
-		fmt.Fprintf(cmd.ErrOrStderr(), "checking %s…\n", e.ID)
-		r := a.Check(ctx, e, limit)
-		if r.Err != nil {
-			failed++
-			fmt.Fprintf(w, "%s %s (%s): FAILED %v [%s]\n", r.ID, r.Version, r.Kind, firstErrLine(r.Err), r.Took)
-			continue
-		}
-		fmt.Fprintf(w, "%s %s (%s): %s · protocol %d · session: %s · caps: %s · sign-in: %s [%s]\n", r.ID, r.Version, r.Kind,
-			r.Agent, r.Protocol, r.Session, strings.Join(r.Caps, ","), strings.Join(r.Auth, ", "), r.Took)
-	}
-	if failed > 0 {
-		return fmt.Errorf("%d of %d agent(s) failed", failed, len(entries))
-	}
-	return nil
+	return t.Format("2006-01-02")
 }
 
-func firstErrLine(err error) string {
-	s, _, _ := strings.Cut(strings.TrimSpace(err.Error()), "\n")
-	if len(s) > 200 {
-		s = s[:200] + "…"
+// printAgents is the Agents line of atlas status: per agent, hook and
+// memory state in this Project, and the last hook error if any.
+func printAgents(ctx context.Context, w io.Writer, root string) {
+	var on []string
+	for _, a := range hooks.All() {
+		st := a.State(root)
+		if st == hooks.Absent {
+			continue
+		}
+		s := a.ID()
+		if st == hooks.Outdated {
+			s += " (hook outdated: atlas agents add " + a.ID() + ")"
+		}
+		if mw, ok := mcpconfig.For(a.ID()); ok && mw.State(root) != hooks.Current {
+			s += " (no memory entry)"
+		}
+		on = append(on, s)
 	}
-	return s
+	if len(on) == 0 {
+		fmt.Fprintln(w, "Agents:    none hooked here (atlas agents add <agent>)")
+		return
+	}
+	fmt.Fprintf(w, "Agents:    %s\n", strings.Join(on, ", "))
+	if hooks.GitHooksState(ctx, root) != hooks.Current {
+		fmt.Fprintln(w, "Git hook:  post-commit not installed (atlas agents add <agent> installs it)")
+	}
+	if states, _ := hooks.ListStates(root, ""); len(states) > 0 {
+		live, spooled := 0, 0
+		for _, s := range states {
+			if !s.Ended {
+				live++
+			}
+			spooled += s.Pending
+		}
+		line := fmt.Sprintf("%d session(s) seen by hooks, %d open", len(states), live)
+		if spooled > 0 {
+			line += fmt.Sprintf(", %d turn(s) spooled for the next writer", spooled)
+		}
+		fmt.Fprintf(w, "Hooks:     %s\n", line)
+	}
+	if e := hooks.LastError(root); e != "" {
+		fmt.Fprintf(w, "Hook err:  %s", e)
+	}
 }

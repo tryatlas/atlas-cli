@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -462,7 +461,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	}
 	printCaptureHealth(ctx, w, st, p.Root, b)
 	printMemoryHealth(ctx, w, p.ScopeRoot)
-	printAgents(w)
+	printAgents(ctx, w, p.Root)
 	return nil
 }
 
@@ -534,24 +533,6 @@ func printMemoryHealth(ctx context.Context, w io.Writer, scope string) {
 		chain = fmt.Sprintf("chain BROKEN at revision %d (atlas memory verify)", rep.FirstBad)
 	}
 	fmt.Fprintf(w, "Record:    %d memories · %s · this machine only\n", n, chain)
-}
-
-// printAgents lists the installed agents.
-func printAgents(w io.Writer) {
-	m, _, err := agentsStore().Installed()
-	if err != nil || len(m) == 0 {
-		fmt.Fprintln(w, "Agents:    none installed (atlas agents list)")
-		return
-	}
-	ids := make([]string, 0, len(m))
-	for id, e := range m {
-		if e.Type == "custom" {
-			id += " (custom)"
-		}
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	fmt.Fprintf(w, "Agents:    %s\n", strings.Join(ids, ", "))
 }
 
 func printGates(w io.Writer, dir string, b *store.Binding) {

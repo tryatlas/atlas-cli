@@ -25,34 +25,34 @@ func cachedRegistry(t *testing.T) string {
 
 func TestAgentsListInstallUninstall(t *testing.T) {
 	data := cachedRegistry(t)
-	code, out, e := runCmd(t, "agents", "list")
+	code, out, e := runCmd(t, "acp", "list")
 	if code != 0 || !strings.Contains(out, "npx-agent") || !strings.Contains(out, "available") || !strings.Contains(out, "not for ") {
 		t.Fatalf("%d %s %s", code, out, e)
 	}
-	if code, out, e := runCmd(t, "agents", "install", "npx-agent"); code != 0 || !strings.Contains(out, "Installed Npx Agent 1.2.0") {
+	if code, out, e := runCmd(t, "acp", "install", "npx-agent"); code != 0 || !strings.Contains(out, "Installed Npx Agent 1.2.0") {
 		t.Fatalf("%d %s %s", code, out, e)
 	}
 	b, _ := os.ReadFile(filepath.Join(data, "dev.atlas.ide", "external-agents", "installed.json"))
 	if string(b) != "{\n  \"npx-agent\": {\n    \"type\": \"registry\"\n  }\n}" {
 		t.Fatalf("installed.json: %q", b)
 	}
-	if code, _, e := runCmd(t, "agents", "install", "bin-only"); code == 0 || !strings.Contains(e, "does not run on") {
+	if code, _, e := runCmd(t, "acp", "install", "bin-only"); code == 0 || !strings.Contains(e, "does not run on") {
 		t.Fatalf("%d %s", code, e)
 	}
-	if _, out, _ := runCmd(t, "agents", "list"); !strings.Contains(out, "installed") {
+	if _, out, _ := runCmd(t, "acp", "list"); !strings.Contains(out, "installed") {
 		t.Fatal(out)
 	}
-	if code, out, _ := runCmd(t, "agents", "uninstall", "npx-agent"); code != 0 || !strings.Contains(out, "Uninstalled") {
+	if code, out, _ := runCmd(t, "acp", "uninstall", "npx-agent"); code != 0 || !strings.Contains(out, "Uninstalled") {
 		t.Fatal(out)
 	}
-	if code, _, e := runCmd(t, "agents", "uninstall", "npx-agent"); code == 0 || !strings.Contains(e, "not installed") {
+	if code, _, e := runCmd(t, "acp", "uninstall", "npx-agent"); code == 0 || !strings.Contains(e, "not installed") {
 		t.Fatal(e)
 	}
 }
 
 func TestRunWithoutPromptNeedsTheChatScreen(t *testing.T) {
 	cachedRegistry(t)
-	if code, _, e := runCmd(t, "run", "npx-agent"); code == 0 || !strings.Contains(e, "--prompt") {
+	if code, _, e := runCmd(t, "acp", "run", "npx-agent"); code == 0 || !strings.Contains(e, "--prompt") {
 		t.Fatalf("%d %s", code, e)
 	}
 }
