@@ -157,11 +157,11 @@ var aliases = map[string]string{}
 
 func init() {
 	for name, words := range map[string]string{
-		"Read":   "read readfile view cat",
-		"Edit":   "edit multiedit str_replace str_replace_editor apply_patch applypatch patch notebookedit",
-		"Write":  "write writefile create create_file createfile",
-		"Bash":   "bash shell exec execute run powershell terminal",
-		"Search": "grep glob search find find_files list ls codebase_search",
+		"Read":   "read readfile view cat view_file",
+		"Edit":   "edit multiedit str_replace str_replace_editor apply_patch applypatch patch notebookedit replace_file_content multi_replace_file_content strreplace",
+		"Write":  "write writefile create create_file createfile write_to_file",
+		"Bash":   "bash shell exec execute run powershell terminal run_command exec_command",
+		"Search": "grep glob search find find_files list ls codebase_search grep_search list_dir",
 		"Fetch":  "fetch webfetch websearch web browse",
 		"Delete": "delete rm remove",
 		"Move":   "move mv rename",

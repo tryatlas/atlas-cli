@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -93,11 +94,51 @@ func RunBridge(ctx context.Context, in io.Reader, out io.Writer, f Forwarder) er
 			}
 		}
 		learn(msg, r)
+		if len(messages(r)) == 0 && requestID(msg) != nil {
+			// The server answered with no JSON-RPC body (a bare 4xx): a
+			// request must still get an answer or the agent waits forever. A
+			// request before initialize (Antigravity probes server/discover
+			// first) is "method not found", which makes the client fall back
+			// to initialize.
+			code, text := -32000, fmt.Sprintf("atlas memory server said %d", r.Status)
+			if initMsg == nil {
+				code, text = -32601, "method not found before initialize"
+			}
+			if err := writeRPCError(w, msg, code, text); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := writeReply(w, r); err != nil {
 			return err
 		}
 	}
 	return sc.Err()
+}
+
+// requestID is a message's id, or nil for a notification.
+func requestID(msg []byte) json.RawMessage {
+	var m struct {
+		ID json.RawMessage `json:"id"`
+	}
+	if json.Unmarshal(msg, &m) != nil || len(m.ID) == 0 || string(m.ID) == "null" {
+		return nil
+	}
+	return m.ID
+}
+
+// writeRPCError answers a request with a JSON-RPC error.
+func writeRPCError(w *bufio.Writer, msg []byte, code int, text string) error {
+	id := requestID(msg)
+	if id == nil {
+		return nil // a notification: nothing to answer
+	}
+	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id,
+		"error": map[string]any{"code": code, "message": text}})
+	if _, err := w.Write(append(b, '\n')); err != nil {
+		return err
+	}
+	return w.Flush()
 }
 
 func isMethod(msg []byte, method string) bool {
@@ -161,18 +202,7 @@ func writeReply(w *bufio.Writer, r *Reply) error {
 // writeError answers a request the bridge could not deliver with a JSON-RPC
 // error, so the agent hears about it instead of the bridge ending.
 func writeError(w *bufio.Writer, msg []byte, err error) error {
-	var m struct {
-		ID json.RawMessage `json:"id"`
-	}
-	if json.Unmarshal(msg, &m) != nil || len(m.ID) == 0 {
-		return nil // a notification: nothing to answer
-	}
-	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": m.ID,
-		"error": map[string]any{"code": -32000, "message": "atlas memory server unreachable: " + err.Error()}})
-	if _, werr := w.Write(append(b, '\n')); werr != nil {
-		return werr
-	}
-	return w.Flush()
+	return writeRPCError(w, msg, -32000, "atlas memory server unreachable: "+err.Error())
 }
 
 // ── HTTP forwarder ───────────────────────────────────────────────────────────
@@ -303,4 +333,19 @@ func (f *LocalForwarder) Close(ctx context.Context, sessionID string) {
 	req := httptest.NewRequest(http.MethodDelete, "/mcp", nil).WithContext(ctx)
 	req.Header.Set("Mcp-Session-Id", sessionID)
 	f.h.ServeHTTP(httptest.NewRecorder(), req)
+}
+
+// NewUnixForwarder targets a listener's owner-only control socket, where the
+// grant travels as query parameters (the socket admits only this user).
+func NewUnixForwarder(sock string, g Grant) *HTTPForwarder {
+	q := url.Values{"agent": {g.Agent}, "cwd": {g.Cwd}}
+	if g.SessionID != "" {
+		q.Set("session", g.SessionID)
+	}
+	return &HTTPForwarder{URL: "http://atlas/mcp?" + q.Encode(), Headers: http.Header{},
+		Client: &http.Client{Transport: &http.Transport{Proxy: nil,
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", sock)
+			}}}}
 }

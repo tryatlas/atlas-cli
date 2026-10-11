@@ -9,6 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/atlas-cli/internal/listener"
 	"github.com/tryatlas/atlas-cli/internal/memory/record"
 	"github.com/tryatlas/atlas-cli/internal/memory/server"
 	"github.com/tryatlas/atlas-cli/internal/project"
@@ -88,15 +90,44 @@ func gateRoot(cmd *cobra.Command, cwd string) string {
 	return cwd
 }
 
-// runMCPBridge carries MCP over stdio to a loopback memory server, the
-// desktop's bridge (ADR-0019): `atlas mcp-bridge <url>` with the session's
-// bearer in ATLAS_MCP_TOKEN, never in argv.
+// runMCPBridge carries MCP over stdio to the memory server. With a URL it is
+// the desktop's bridge (ADR-0019): the session's bearer in ATLAS_MCP_TOKEN,
+// never in argv. Without one it is the entry an agent's MCP config holds
+// (ADR-0013 §6): it reaches a running listener over the owner-only socket,
+// else serves memory in this process, so memory works with or without
+// atlas serve.
 func runMCPBridge(cmd *cobra.Command, args []string) error {
-	f, err := server.NewTCPForwarder(args[0], os.Getenv("ATLAS_MCP_TOKEN"))
-	if err != nil {
-		return err
+	if len(args) == 1 {
+		f, err := server.NewTCPForwarder(args[0], os.Getenv("ATLAS_MCP_TOKEN"))
+		if err != nil {
+			return err
+		}
+		return server.RunBridge(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), f)
 	}
-	return server.RunBridge(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), f)
+	root, _ := cmd.Flags().GetString("project")
+	agentID, _ := cmd.Flags().GetString("agent")
+	if root == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		root = cwd
+	}
+	if p, err := project.Discover(cmd.Context(), root); err == nil {
+		root = p.Root
+	} else if c, err := project.Canonical(root); err == nil {
+		root = c
+	}
+	if agentID == "" {
+		agentID = "unknown"
+	}
+	g := server.Grant{Agent: agentID, Cwd: root, SessionID: hooks.CurrentSession(root, agentID)}
+	if rf := listener.ReadRunFile(root); rf != nil {
+		return server.RunBridge(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), server.NewUnixForwarder(rf.Socket, g))
+	}
+	srv := server.New(version)
+	defer srv.Close()
+	return server.RunBridge(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), server.NewLocalForwarder(srv, g))
 }
 
 // runMemoryBrowse opens the memory browser.

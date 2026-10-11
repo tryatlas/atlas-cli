@@ -37,8 +37,9 @@ func newRootCmd() *cobra.Command {
 		newCaptureCmd(),
 		newServeCmd(),
 		withRun(leaf("status", "Show login, organisation, Project, gates, capture health and agent integrations", cobra.NoArgs), runStatus),
-		newRunCmd(),
 		newAgentsCmd(),
+		newHooksCmd(),
+		newACPCmd(),
 		newMCPBridgeCmd(),
 	)
 	return root
@@ -123,15 +124,19 @@ func newCaptureCmd() *cobra.Command {
 }
 
 func newServeCmd() *cobra.Command {
-	c := withRun(leaf("serve", "Run the Project's listener (memory server and sync drain)", cobra.NoArgs), runServe)
+	c := withRun(leaf("serve", "Run the Project's listener: memory server, sync drain, and the receiver of agent hooks", cobra.NoArgs), runServe)
 	c.Flags().Bool("daemon", false, "start the listener detached")
 	c.Flags().Bool("stop", false, "stop a detached listener")
+	c.Flags().Duration("import-every", 0, "ACP import of native sessions this often (parked; 0: never)")
+	_ = c.Flags().MarkHidden("import-every")
 	c.MarkFlagsMutuallyExclusive("daemon", "stop")
 	return c
 }
 
 func newMCPBridgeCmd() *cobra.Command {
-	c := withRun(leaf("mcp-bridge <url>", "Carry MCP over stdio to a loopback memory server, with ATLAS_MCP_TOKEN (used by agents)", cobra.ExactArgs(1)), runMCPBridge)
+	c := withRun(leaf("mcp-bridge [url]", "Carry MCP over stdio to the Project's memory server (used by agents' MCP configs)", cobra.MaximumNArgs(1)), runMCPBridge)
+	c.Flags().String("project", "", "the Project root (an agent's MCP config passes it; default: the cwd)")
+	c.Flags().String("agent", "", "the agent id the bridge serves")
 	c.Hidden = true
 	return c
 }
@@ -156,5 +161,12 @@ func newMemoryListCmd() *cobra.Command {
 	c := withRun(leaf("list", "Print shared memory entries (for scripts; atlas memory browse on a terminal)", cobra.NoArgs), runMemoryList)
 	c.Flags().String("kind", "", "only this kind: plan, file_changed, decision, fact, failure, architecture, preference")
 	c.Flags().String("search", "", "search instead of listing")
+	return c
+}
+
+func newCaptureImportCmd() *cobra.Command {
+	c := withRun(leaf("import", "Replay sessions over ACP (session/list and session/load) into capture (parked)", cobra.NoArgs), runCaptureImport)
+	c.Flags().StringArray("agent", nil, "only this installed agent (repeatable; default: every installed agent)")
+	c.Flags().Bool("dry-run", false, "list what would be imported")
 	return c
 }

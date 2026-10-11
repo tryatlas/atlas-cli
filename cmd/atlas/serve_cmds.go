@@ -18,8 +18,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tryatlas/atlas-cli/internal/auth"
+	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 	capsync "github.com/tryatlas/atlas-cli/internal/capture/sync"
+	"github.com/tryatlas/atlas-cli/internal/hooks"
 	"github.com/tryatlas/atlas-cli/internal/hosts"
 	"github.com/tryatlas/atlas-cli/internal/ingest"
 	"github.com/tryatlas/atlas-cli/internal/listener"
@@ -179,14 +181,48 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	if h.Capturing() {
+		h.Listener.SetHookSink(func(ctx context.Context, body []byte) error {
+			var d hooks.Delivery
+			if err := json.Unmarshal(body, &d); err != nil {
+				return err
+			}
+			d.Root = p.Root
+			return hooks.Apply(ctx, h.Recorder, h.Listener.Memory, []hooks.Delivery{d})
+		})
+		h.Listener.SetLinker(func(ctx context.Context) error {
+			_, err := gitlink.Link(ctx, h.Store, p.Root, time.Now)
+			return err
+		})
+		if err := hooks.DrainSpool(ctx, p.Root, h.Recorder, h.Listener.Memory); err != nil {
+			fmt.Fprintln(cmd.ErrOrStderr(), "atlas: spooled hook turns:", err)
+		}
+	}
+	every, _ := cmd.Flags().GetDuration("import-every")
+	var im *atlasrun.Importer
+	if every > 0 && h.Capturing() {
+		im = atlasrun.NewImporter(agentsStore(), h, p.Root)
+		h.Listener.SetImporter(im)
+		ictx, stop := context.WithCancel(ctx)
+		defer stop()
+		go im.Loop(ictx, every, func(res []atlasrun.ImportResult, err error) {
+			logImport(cmd.ErrOrStderr(), res, err, false)
+		})
+	}
 	if os.Getenv(daemonEnv) == "" {
-		fmt.Fprintf(out, "Serving %s: memory on %s, sync drain running. Ctrl-C to stop.\n", p.Root, h.Listener.MCPURL())
+		fmt.Fprintf(out, "Serving %s: memory on %s, sync drain running, agent hooks delivered here. Ctrl-C to stop.\n", p.Root, h.Listener.MCPURL())
+		if im != nil {
+			fmt.Fprintf(out, "Importing sessions from the agents' own UIs every %s.\n", every)
+		}
 	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	select {
 	case <-sig:
 	case <-ctx.Done():
+	}
+	if im != nil {
+		im.Close()
 	}
 	res, err := h.Close()
 	if res.Checkpoints > 0 && os.Getenv(daemonEnv) == "" {
@@ -210,7 +246,12 @@ func startDaemon(cmd *cobra.Command, root string) error {
 		return err
 	}
 	defer logf.Close()
-	child := exec.Command(self, "serve") //nolint:gosec // G204: this binary
+	every, _ := cmd.Flags().GetDuration("import-every")
+	args := []string{"serve"}
+	if every > 0 {
+		args = append(args, "--import-every", every.String())
+	}
+	child := exec.Command(self, args...) //nolint:gosec // G204: this binary
 	child.Dir = root
 	child.Env = append(os.Environ(), daemonEnv+"=1")
 	child.Stdout, child.Stderr = logf, logf
@@ -284,3 +325,84 @@ type signedOut struct{}
 
 func (signedOut) Token(context.Context) (string, error) { return "", auth.ErrSignedOut }
 func (signedOut) Invalidate()                           {}
+
+// runCaptureImport imports native-UI sessions now: in this process when the
+// store is free, else by asking the running listener.
+func runCaptureImport(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
+	out := cmd.OutOrStdout()
+	only, _ := cmd.Flags().GetStringArray("agent")
+	dry, _ := cmd.Flags().GetBool("dry-run")
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	p, err := project.Discover(ctx, cwd)
+	if err != nil {
+		return err
+	}
+	h, err := atlasrun.StartHost(p.Root, hostOptions(false))
+	if errors.Is(err, atlasrun.ErrLocked) {
+		rf := listener.ReadRunFile(p.Root)
+		if rf == nil {
+			return err
+		}
+		body, _ := json.Marshal(listener.SyncRequest{Import: true})
+		if err := postControl(ctx, rf.Socket, body); err != nil {
+			return fmt.Errorf("the running listener did not answer: %w", err)
+		}
+		fmt.Fprintln(out, "Asked the running listener to import now.")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	im := atlasrun.NewImporter(agentsStore(), h, p.Root)
+	res, ierr := im.Run(ctx, only, dry)
+	im.Close()
+	logImport(out, res, ierr, true)
+	if _, err := h.Close(); err != nil && ierr == nil {
+		ierr = err
+	}
+	return ierr
+}
+
+// logImport reports a pass: every agent when verbose, else only news.
+func logImport(w interface{ Write([]byte) (int, error) }, res []atlasrun.ImportResult, err error, verbose bool) {
+	for _, r := range res {
+		switch {
+		case r.Err != nil:
+			fmt.Fprintf(w, "%s: %v\n", r.Agent, firstErrLine(r.Err))
+		case r.Turns > 0 || verbose:
+			line := fmt.Sprintf("%s: %d session(s) here, %d replayed, %d turn(s) captured", r.Agent, r.Listed, r.Replayed, r.Turns)
+			if r.Note != "" {
+				line += " (" + r.Note + ")"
+			}
+			fmt.Fprintln(w, line)
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(w, "import:", err)
+	}
+}
+
+func postControl(ctx context.Context, sock string, body []byte) error {
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", sock)
+		}}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://atlas/sync", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("listener said %d", resp.StatusCode)
+	}
+	return nil
+}

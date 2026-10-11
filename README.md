@@ -1,9 +1,10 @@
 # atlas-cli
 
-A headless Atlas for servers: a Go binary with a Bubble Tea TUI that signs in
-like the Atlas desktop app, binds a folder to an organisation and a cloud
-Project, and gives every coding agent run in that folder **shared memory** and
-**session capture**, byte-compatible with the desktop's on-disk formats.
+A headless Atlas for servers: a Go binary that signs in like the Atlas desktop
+app, binds a folder to an organisation and a cloud Project, and gives every
+coding agent run in that folder **session capture** and **shared memory**,
+byte-compatible with the desktop's on-disk formats. The agents keep their own
+UIs: Atlas plugs into their hooks (ADR-0013).
 
 ## Install
 
@@ -20,28 +21,56 @@ source: `make build` (pure Go, no cgo).
 ## Use
 
 ```
-atlas login                 # device grant against the Atlas auth server
+atlas login                     # device grant against the Atlas auth server
 cd ~/work/backend
-atlas init                  # org + cloud Project, writes .atlas/ (--local: no cloud)
-atlas agents list           # the ACP registry: every agent, installed or not
-atlas run claude-acp        # chat screen: any registry agent over ACP, with
-atlas run codex-acp         #   full capture, cloud sync and shared memory
-atlas status
+atlas init                      # org + cloud Project, writes .atlas/ (--local: no cloud)
+atlas agents add claude-code    # the agents you use here (atlas agents list shows all eight)
+atlas agents add codex cursor
+claude                          # …or codex, cursor-agent, opencode: work as usual
+atlas status                    # sessions captured, commits linked, sync
 ```
+
+`atlas agents add` writes two things into the agent's own config in the
+Project: its **hook**, which runs `atlas hooks <agent> <event>` at session
+start, each prompt, each turn end and session end; and the **`atlas_memory`
+MCP server**, so the agent can read and write shared memory. It also installs a
+git `post-commit` hook that links sessions to the commits that carry their
+work. Nothing is wrapped and no environment variable changes; remove it all with
+`atlas agents remove <agent>`.
+
+Agents run their project hooks only for a project you trust: Codex, Copilot
+and Pi each ask once in their own UI. Keep `atlas` current on PATH, including
+`~/.local/bin`, which some agents put first.
+
+At each turn end the hook reads the agent's transcript from where the turn
+started, diffs `git status`, and records the prompt, the reply, the tool calls
+with the files they wrote, token usage and the model. The hook writes to the
+store itself, or hands the turn to a running `atlas serve`, or spools it when
+the desktop app has the folder open. A hook never fails the agent: errors go to
+`.atlas/cli-hooks.log` and `atlas status`.
+
+| agent | hook written to | memory server written to |
+|---|---|---|
+| `claude-code` Claude Code | `.claude/settings.local.json` | `.mcp.json` (+ approved in the local settings) |
+| `codex` Codex | `.codex/hooks.json`: the first interactive `codex` here asks "Hooks need review"; choose **Trust all and continue** (`codex exec` cannot ask) | `.codex/config.toml` (trusted projects) |
+| `cursor` Cursor CLI and IDE | `.cursor/hooks.json` (`cursor-agent -p` fires no turn hooks; such a session is captured at its end) | `.cursor/mcp.json` (Cursor asks to approve it once) |
+| `copilot` GitHub Copilot CLI | `.github/hooks/atlas.json`: loaded once the folder is trusted (the first interactive `copilot` asks; `copilot -p` does not) | `.github/mcp.json` (same trust) |
+| `opencode` OpenCode | `.opencode/plugins/atlas.ts` | `opencode.json` |
+| `droid` Factory Droid | `.factory/settings.json` | `.factory/mcp.json` |
+| `antigravity` Antigravity (`agy`) | `.agents/hooks.json` (run `agy` with an absolute `--add-dir`) | `.agents/mcp_config.json` |
+| `pi` Pi | `.pi/extensions/atlas/index.ts`: loaded once the project is trusted in Pi (`pi --approve` for one run) | `.pi/mcp.json` (same trust) |
 
 | command | what |
 |---|---|
-| `atlas run <agent>` | chat screen (streamed replies, tool cards with diffs, permission prompts, mode/model pickers, slash commands, sessions; ctrl+h lists the keys) |
-| `atlas run <agent> --prompt "…" --no-tui [--yes] [--image f.png]` | one prompt, headless, for CI and cron |
-| `atlas agents list \| install \| uninstall \| detect \| check \| logout` | the registry, installs, and a handshake check (`check --all`) |
+| `atlas agents add \| remove \| list \| sessions` | install or remove the hook and memory entry per agent; list agents and the sessions seen |
+| `atlas serve [--daemon \| --stop]` | the Project's listener: memory server, sync drain, receiver of hook turns while it holds the store |
+| `atlas status` | sign-in, Project, gates, capture health, commits linked, sync, memory, agents and hook errors |
 | `atlas memory browse \| list \| verify \| export \| import` | shared memory (this machine only) |
-| `atlas capture sync \| retry \| link` | cloud sync now, retry failed rows, link sessions to commits |
-| `atlas serve [--daemon \| --stop]` | the Project's listener without a chat screen |
-| `atlas status` | sign-in, Project, gates, capture health, sync, memory, agents |
+| `atlas capture sync \| retry \| link` | cloud sync now, retry failed rows, link sessions to commits by hand |
+| `atlas mcp-bridge --project <dir> --agent <id>` | the stdio MCP entry the agents' configs hold (serves memory with or without `atlas serve`) |
 
-Agents sign in through their own methods (`atlas run` offers them when an
-agent asks). Debugging an agent: `ATLAS_ACP_TRACE=/tmp/acp.trace atlas run …`
-records the shape of every protocol message, never its content.
+The ACP path of v0.1 (`atlas run <agent>` with Atlas's own chat screen, the
+registry installs) is parked under the hidden `atlas acp` group (ADR-0013 §8).
 
 ## Where things are
 
@@ -50,12 +79,13 @@ records the shape of every protocol message, never its content.
 | `docs/atlas-reference/README.md` | index of the hand-off folder copied from the desktop repo: read first |
 | `docs/atlas-reference/SPEC.md` | the specification; §1.2 holds the locked decisions D1–D20 |
 | `docs/atlas-reference/evidence-*.md` | desktop-side facts with `file:line` citations into the desktop repo |
-| `docs/atlas-reference/adr/` | the desktop ADRs this project leans on |
-| `docs/adr/` | this repo's own ADRs; `0000` records D7, `0001`–`0007` record D13–D19, `0009` records D20 (ACP only, the app's way), `0010` the hand-rolled JSON-RPC, `0011` the Intel Mac release; `0000`, `0003`, `0004` are superseded |
+| `docs/research/entire-cli.md` | how the Entire CLI captures agents through hooks; the per-agent facts this CLI's integrations follow |
+| `docs/adr/` | this repo's own ADRs; `0013` is the hook-based capture of native agent UIs and supersedes `0009`/`0012` as the product |
 | `docs/RELEASE.md` | how to release, and the acceptance checklists |
 | `docs/progress.md` | what was built, what was verified live, what was not |
 
-Ground rules that are not negotiable: never read another agent's transcript
-files, never inject memory into prompts, never log an `Authorization` header,
-every stored text passes the redactor first, and no secret persists except the
-session token file (mode 0600).
+Ground rules that are not negotiable: a hook reads only the transcript file
+the agent's own payload names, from the turn's offset, while the hook runs
+(never a scan of an agent's directories); never inject memory into prompts;
+never log an `Authorization` header; every stored text passes the redactor
+first; and no secret persists except the session token file (mode 0600).

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -341,5 +342,20 @@ func TestTokenBoundAfterInitializeCarriesTheSession(t *testing.T) {
 	es, _ := st.EntriesBySessions(context.Background(), []string{"acp-1"}, 10)
 	if len(es) != 1 {
 		t.Fatalf("the write carries the bound session id: %d entries", len(es))
+	}
+}
+
+func TestBridgeAnswersARequestBeforeInitialize(t *testing.T) {
+	srv := New("test")
+	defer srv.Close()
+	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{}}` + "\n" +
+		`{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}` + "\n")
+	var out bytes.Buffer
+	if err := RunBridge(context.Background(), in, &out, NewLocalForwarder(srv, Grant{SessionID: "s", Agent: "agy", Cwd: t.TempDir()})); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"id":1`) || !strings.Contains(lines[0], "-32601") || !strings.Contains(lines[1], `"protocolVersion"`) {
+		t.Fatalf("bridge output:\n%s", out.String())
 	}
 }

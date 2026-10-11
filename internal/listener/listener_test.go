@@ -95,13 +95,32 @@ func TestSyncControlOverTheSocket(t *testing.T) {
 	if ans.Requeued != 3 || s.retried != 1 || s.forced != 1 {
 		t.Fatalf("%+v %+v", ans, s)
 	}
-	resp, err = c.Get("http://atlas/hook")
+	resp, err = c.Get("http://atlas/nothing")
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("socket serves only /sync: %d", resp.StatusCode)
+		t.Fatalf("an unknown control path must 404: %d", resp.StatusCode)
+	}
+	// /hook without a sink refuses; with one it delivers the body.
+	resp, err = c.Post("http://atlas/hook", "application/json", strings.NewReader(`{"root":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("/hook with no sink = %d, want 409", resp.StatusCode)
+	}
+	var got string
+	l.SetHookSink(func(_ context.Context, body []byte) error { got = string(body); return nil })
+	resp, err = c.Post("http://atlas/hook", "application/json", strings.NewReader(`{"root":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || got != `{"root":"x"}` {
+		t.Fatalf("/hook = %d %q", resp.StatusCode, got)
 	}
 }
 
