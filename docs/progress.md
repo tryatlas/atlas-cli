@@ -988,3 +988,20 @@ Still open, needing the user:
   `gh`);
 - elicitation has not been seen from a real agent (none of the 38 sent
   one), so only the fixtures cover it.
+
+## v0.1.0
+
+- Commit `8505825` (Apache-2.0 LICENSE added). CI run 38133858890 is green
+  on lint and on tests for linux/amd64, linux/arm64, darwin/arm64 and
+  darwin/amd64, with no Node 20 warnings.
+- PR #1 `feat/cli-foundation` → `main` is open for review.
+- Tag `v0.1.0` on `8505825`. Release run 38134075354: tests, then GoReleaser.
+  It produced a **draft** release with `atlas_0.1.0_{linux,darwin}_{amd64,arm64}.tar.gz`,
+  `checksums.txt` and `install.sh`.
+- Installed from the draft on this Intel Mac through `install.sh` (the `gh`
+  path, private repository): `atlas 0.1.0`, a native x86_64 Mach-O.
+  `atlas status` read the cloud Project; `atlas agents check claude-acp`
+  answered with session ok.
+- Published (no longer a draft), now the repository's latest release. Not done:
+  merging PR #1, the
+  desktop checklist.
