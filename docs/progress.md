@@ -1175,3 +1175,11 @@ Known gaps (recorded, not hidden):
 | droid (0.238.0) | ⚠️ hooks fire (session-start, user-prompt-submit, session-end state recorded, transcript path resolved) but the agent itself refused: "Authentication failed. Please log in using /login or set FACTORY_API_KEY". Needs the user's Factory sign-in to finish the test |
 | cursor (CLI 2026.10.01, Free plan, `--model auto`) | ✅ interactive TUI (pty): sessionStart (fires at the first prompt, not at launch), beforeSubmitPrompt, stop with tokens, sessionEnd (~11 s after `/exit`); prompt, two replies, `Write` and `Bash` calls, file touches, usage (15 787 / 215 / 15 488 cached). The CLI writes the nested transcript path and names it only from the first tool hook on; `model` is always "default" (recorded as `auto`); `stop.status: error` marks the turn failed. `cursor-agent -p` fires no prompt/stop hooks at all, so a `-p` session is captured as one turn at sessionEnd from its transcript. Cursor runs hooks through the login shell, so `~/.local/bin/atlas` must be current. The TUI asks to approve the `atlas_memory` MCP server once (or `--approve-mcps`) |
 | antigravity (`agy` 1.3.3, Gemini API key, installed under a temp HOME) | ✅ `agy -p … --add-dir <abs> --dangerously-skip-permissions`: prompt, thinking, reply, `Write` (`write_to_file`) with the file touch, usage (per-step token fields, matching agy's own total). PreInvocation, PreToolUse and Stop fire; on 1.3.3 the transcript is written incrementally (the user step lands before PreInvocation, so the reader's position stops at the last model step). Found and fixed a bridge bug: agy's MCP client sends `server/discover` before `initialize` and hung on our silent 404; the bridge now answers -32601 and agy falls back to `initialize`. Without the skip-permissions flag a headless write is auto-denied and the Stop hook does not fire, leaving the session "in a turn" until Sweep |
+
+## v0.2.0
+
+Published 2026-10-12 from the head of `feat/hooks-capture` (PR #2):
+https://github.com/tryatlas/atlas-cli/releases/tag/v0.2.0, four archives,
+`checksums.txt`, `install.sh`. CI and the release workflow were green on
+all four native runners. The anonymous installer delivers a build with the
+hooks commands.
