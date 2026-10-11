@@ -26,7 +26,7 @@ func TestInstallStateUninstall(t *testing.T) {
 	if !strings.HasPrefix(string(b), "// Atlas extension for Pi — written by atlas agents add; do not edit (rewritten on the next add).\n") {
 		t.Fatalf("header missing:\n%s", b[:120])
 	}
-	for _, want := range []string{"exec atlas hooks pi ${verb}", `"session-start"`, `"before-agent-start"`, `"agent-end"`, "ATLAS_PI_NESTED", "command -v atlas", "10_000"} {
+	for _, want := range []string{"exec atlas hooks pi ${verb}", `"session-start"`, `"before-agent-start"`, `"tool-result"`, `"agent-end"`, `pi.on("tool_result"`, "parentToolCallId", "64 * 1024", "let queue", "ATLAS_PI_NESTED", "command -v atlas", "10_000"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("extension lacks %q", want)
 		}
@@ -123,6 +123,30 @@ func TestParse(t *testing.T) {
 	}
 	if ev.Kind != hooks.TurnEnd || ev.SessionID != "explicit" {
 		t.Fatalf("agent-end = %+v", ev)
+	}
+	ev, err = a.Parse(VerbToolResult, []byte(`{"type":"tool_result","cwd":"/repo","session_file":"`+file+`","tool_call_id":"call_1","tool_name":"write","args":{"path":"rt.txt","content":"realtime\n"},"result":"Successfully wrote 9 bytes to rt.txt","is_error":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.Kind != hooks.ToolUse || ev.Tool == nil || ev.SessionID != "3f2b1c4d-aaaa-bbbb-cccc-0123456789ab" {
+		t.Fatalf("tool-result = %+v", ev)
+	}
+	if ev.Tool.NativeID != "call_1" || ev.Tool.Name != "write" || ev.Tool.Status != "completed" || string(ev.Tool.Arguments) != `{"path":"rt.txt","content":"realtime\n"}` {
+		t.Fatalf("tool = %+v", ev.Tool)
+	}
+	if ev.Tool.Result == nil || *ev.Tool.Result != "Successfully wrote 9 bytes to rt.txt" {
+		t.Fatalf("tool result = %v", ev.Tool.Result)
+	}
+	ev, err = a.Parse(VerbToolResult, []byte(`{"type":"tool_result","session_file":"`+file+`","tool_call_id":"call_2","tool_name":"bash","args":{"command":"cat missing"},"result":"cat: missing: No such file","is_error":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.Tool == nil || ev.Tool.Status != "failed" || ev.Tool.NativeID != "call_2" {
+		t.Fatalf("failed tool-result = %+v", ev.Tool)
+	}
+	// A result payload with no call to speak of is dropped.
+	if ev, err := a.Parse(VerbToolResult, []byte(`{"type":"tool_result","session_file":"`+file+`","tool_name":"bash"}`)); err != nil || ev != nil {
+		t.Fatalf("callless tool-result = %+v, %v", ev, err)
 	}
 	// No session: nothing to track (pi --no-session).
 	if ev, err := a.Parse(VerbAgentEnd, []byte(`{"type":"agent_end","cwd":"/repo"}`)); err != nil || ev != nil {

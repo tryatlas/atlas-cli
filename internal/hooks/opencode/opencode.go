@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/hooks"
 	"github.com/tryatlas/atlas-cli/internal/project"
 )
@@ -35,6 +36,7 @@ const (
 	VerbTurnEnd      = "turn-end"
 	VerbCompaction   = "compaction"
 	VerbSessionEnd   = "session-end"
+	VerbToolUse      = "tool-use"
 )
 
 // Plugin is the plugin OpenCode loads from .opencode/plugins/atlas.ts.
@@ -57,7 +59,7 @@ func (Agent) Binary() string { return "opencode" }
 
 // Verbs are the hook verbs the plugin invokes.
 func (Agent) Verbs() []string {
-	return []string{VerbSessionStart, VerbTurnStart, VerbTurnEnd, VerbCompaction, VerbSessionEnd}
+	return []string{VerbSessionStart, VerbTurnStart, VerbToolUse, VerbTurnEnd, VerbCompaction, VerbSessionEnd}
 }
 
 // PluginPath is the plugin file under root. OpenCode loads every file in
@@ -133,11 +135,39 @@ func (Agent) Response(hooks.Kind, string) []byte { return nil }
 func (Agent) ResumeCommand(id string) string { return "opencode -s " + id }
 
 // payload is what the plugin sends: session_id always, prompt and model at
-// turn start, model at turn end.
+// turn start, model at turn end, and at tool-use the completed call from
+// OpenCode's tool.execute.after hook: the tool's wire name, its call id (the
+// callID the export's tool part carries too), the title and output OpenCode
+// shows, the tool's metadata, and the arguments (from the hook's input, or
+// remembered from tool.execute.before).
 type payload struct {
-	SessionID string `json:"session_id"`
-	Prompt    string `json:"prompt"`
-	Model     string `json:"model"`
+	SessionID string          `json:"session_id"`
+	Prompt    string          `json:"prompt"`
+	Model     string          `json:"model"`
+	Tool      string          `json:"tool"`
+	CallID    string          `json:"call_id"`
+	Title     string          `json:"title"`
+	Output    *string         `json:"output"`
+	Metadata  json.RawMessage `json:"metadata"`
+	Args      json.RawMessage `json:"args"`
+}
+
+// toolOf is the completed call a tool-use payload describes, in the shape
+// the export reader gives the same call (export.go toolOf): the same
+// NativeID, so the turn-end read drops it as already delivered.
+func (p payload) toolOf() *record.Tool {
+	if p.CallID == "" || p.Tool == "" {
+		return nil
+	}
+	t := &record.Tool{NativeID: p.CallID, Name: p.Tool, Title: p.Title, Status: "completed"}
+	if a := bytes.TrimSpace(p.Args); len(a) > 0 && string(a) != "null" {
+		t.Arguments = a
+	}
+	if p.Output != nil {
+		t.Result = p.Output
+	}
+	t.Locations = (&toolState{Metadata: p.Metadata}).files()
+	return t
 }
 
 // Parse maps a hook verb and payload to an event. The payload names no
@@ -158,6 +188,12 @@ func (Agent) Parse(verb string, raw []byte) (*hooks.Event, error) {
 	case VerbTurnStart:
 		ev.Kind = hooks.TurnStart
 		ev.Prompt = StripReminders(p.Prompt)
+	case VerbToolUse:
+		ev.Kind = hooks.ToolUse
+		ev.Tool = p.toolOf()
+		if ev.Tool == nil {
+			return nil, nil
+		}
 	case VerbTurnEnd:
 		ev.Kind = hooks.TurnEnd
 	case VerbCompaction:

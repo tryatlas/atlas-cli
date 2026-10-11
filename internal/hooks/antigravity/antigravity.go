@@ -7,8 +7,11 @@
 // names the model (modelName); the transcript is written step by step, the
 // USER_INPUT step before PreInvocation fires and the last PLANNER_RESPONSE
 // before Stop (older releases wrote it after Stop, which Settle still
-// tolerates); and each PLANNER_RESPONSE step carries input_tokens,
-// output_tokens and cache_read_tokens.
+// tolerates); each PLANNER_RESPONSE step carries input_tokens,
+// output_tokens and cache_read_tokens; and PreToolUse/PostToolUse carry the
+// call (toolCall) and stepIdx, the index of the step its output will be, one
+// after the PLANNER_RESPONSE that made it, which is not yet on disk when
+// PostToolUse fires, so no hook sees the tool's output.
 package antigravity
 
 import (
@@ -18,7 +21,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 
+	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/hooks"
 )
 
@@ -37,6 +42,7 @@ type Agent struct{}
 const (
 	VerbPreInvocation = "pre-invocation"
 	VerbPreToolUse    = "pre-tool-use"
+	VerbPostToolUse   = "post-tool-use"
 	VerbStop          = "stop"
 )
 
@@ -55,7 +61,9 @@ func (Agent) Name() string { return "Antigravity" }
 func (Agent) Binary() string { return "agy" }
 
 // Verbs are the hook verbs the installed config invokes.
-func (Agent) Verbs() []string { return []string{VerbPreInvocation, VerbPreToolUse, VerbStop} }
+func (Agent) Verbs() []string {
+	return []string{VerbPreInvocation, VerbPreToolUse, VerbPostToolUse, VerbStop}
+}
 
 // HooksPath is the workspace hooks file agy loads for a trusted workspace.
 func HooksPath(root string) string { return filepath.Join(root, ".agents", "hooks.json") }
@@ -88,6 +96,9 @@ func render(disabled bool) entry {
 	e := entry{
 		PreToolUse: []toolHandler{{Matcher: "*", Hooks: []hooks.CommandHook{
 			{Type: "command", Command: hooks.Wrap(hooks.Command(ID, VerbPreToolUse))},
+		}}},
+		PostToolUse: []toolHandler{{Matcher: "*", Hooks: []hooks.CommandHook{
+			{Type: "command", Command: hooks.Wrap(hooks.Command(ID, VerbPostToolUse))},
 		}}},
 		PreInvocation: []plainHandler{{Type: "command", Command: hooks.Wrap(hooks.Command(ID, VerbPreInvocation))}},
 		Stop:          []plainHandler{{Type: "command", Command: hooks.Wrap(hooks.Command(ID, VerbStop)), Timeout: stopTimeout}},
@@ -181,9 +192,11 @@ func (Agent) Response(hooks.Kind, string) []byte { return nil }
 func (Agent) ResumeCommand(id string) string { return "agy --conversation " + id }
 
 // payload is the union of the fields read from agy's hook stdin. agy also
-// sends artifactDirectoryPath, stepIdx, initialNumSteps, executionNum,
-// terminationReason and error; only the ones below are used. modelName
-// (e.g. "gemini-3.1-pro-low") is in every hook's payload on agy 1.3.3.
+// sends artifactDirectoryPath, initialNumSteps, executionNum and
+// terminationReason; only the ones below are used. modelName (e.g.
+// "gemini-3.1-pro-low") is in every hook's payload on agy 1.3.3. stepIdx
+// (Pre/PostToolUse) is the index of the step the tool's output will be
+// written as; error (PostToolUse, Stop) is "" unless the tool or run failed.
 type payload struct {
 	ConversationID string   `json:"conversationId"`
 	TranscriptPath string   `json:"transcriptPath"`
@@ -191,19 +204,23 @@ type payload struct {
 	InvocationNum  int      `json:"invocationNum"`
 	ModelName      string   `json:"modelName"`
 	FullyIdle      bool     `json:"fullyIdle"`
-	ToolCall       struct {
-		Name string          `json:"name"`
-		Args json.RawMessage `json:"args"`
-	} `json:"toolCall"`
+	StepIdx        *int     `json:"stepIdx"`
+	Error          string   `json:"error"`
+	ToolCall       toolCall `json:"toolCall"`
 }
 
 // Parse maps a hook verb and payload to an event:
 //
-//   - pre-invocation → TurnStart with no prompt (the dispatcher reads it
-//     from the transcript at turn end); agy fires one per model call, and a
-//     follow-up call within an open turn must not restart it;
+//   - pre-invocation → TurnStart. On the first model call of a turn the
+//     prompt is already in the transcript the payload names and no model
+//     step follows it, so it is read from there and opens the turn at once;
+//     a follow-up call within the turn (the transcript ends with model
+//     steps) carries no prompt, and the dispatcher keeps the turn open;
 //   - pre-tool-use → ToolUse with the target file of a write tool, nothing
 //     for any other tool;
+//   - post-tool-use → ToolUse with the completed call, keyed like the
+//     transcript reader keys it so the turn-end read does not record it
+//     twice; the payload has no output, only an error when the call failed;
 //   - stop → TurnEnd when fullyIdle is true, nothing while background work
 //     continues.
 func (Agent) Parse(verb string, raw []byte) (*hooks.Event, error) {
@@ -220,13 +237,26 @@ func (Agent) Parse(verb string, raw []byte) (*hooks.Event, error) {
 	switch verb {
 	case VerbPreInvocation:
 		ev.Kind = hooks.TurnStart
+		if p.TranscriptPath != "" {
+			ev.Prompt = pendingPrompt(p.TranscriptPath)
+		}
 	case VerbPreToolUse:
-		files := writeTargets(p.ToolCall.Name, p.ToolCall.Args)
+		files := p.ToolCall.writeTargets()
 		if len(files) == 0 {
 			return nil, nil
 		}
 		ev.Kind = hooks.ToolUse
 		ev.Files = files
+	case VerbPostToolUse:
+		if p.ToolCall.Name == "" || p.StepIdx == nil || *p.StepIdx < 1 {
+			return nil, nil
+		}
+		ev.Kind = hooks.ToolUse
+		ev.Tool = p.ToolCall.tool(callID(p.TranscriptPath, *p.StepIdx, p.ToolCall))
+		if p.Error != "" {
+			msg := p.Error
+			ev.Tool.Status, ev.Tool.Result = "failed", &msg
+		}
 	case VerbStop:
 		if !p.FullyIdle {
 			return nil, nil
@@ -269,19 +299,61 @@ var toolKinds = map[string]string{
 }
 
 // writeTargets is the file a write tool call names, or nothing.
-func writeTargets(name string, args json.RawMessage) []string {
-	if !writeTools[name] {
+func (tc toolCall) writeTargets() []string {
+	if !writeTools[tc.Name] {
 		return nil
 	}
-	var m map[string]json.RawMessage
-	if json.Unmarshal(args, &m) != nil {
-		return nil
-	}
-	target, _ := decodeString(m["TargetFile"])
+	target, _ := decodeString(tc.Args["TargetFile"])
 	if target == "" {
 		return nil
 	}
 	return []string{target}
+}
+
+// callID is the id the transcript reader gives the call whose output step
+// will be stepIdx: the PLANNER_RESPONSE step that made it (the last one
+// before stepIdx, on disk before the tool runs) and the call's index in it.
+// A planner step may hold several calls; their outputs follow it one step
+// each in call order, so the index is the distance from the planner step.
+// With no readable transcript or no step that fits, the call is taken as
+// the only one of the step before.
+func callID(path string, stepIdx int, tc toolCall) string {
+	fallback := strconv.Itoa(stepIdx-1) + "-0"
+	if path == "" {
+		return fallback
+	}
+	var planner *step
+	err := eachNonBlankLine(path, func(_ int, raw []byte) {
+		var s step
+		if json.Unmarshal(raw, &s) != nil || s.Type != "PLANNER_RESPONSE" || s.StepIndex >= stepIdx {
+			return
+		}
+		planner = &s
+	})
+	if err != nil || planner == nil {
+		return fallback
+	}
+	i := stepIdx - planner.StepIndex - 1
+	if i < 0 || i >= len(planner.ToolCalls) || planner.ToolCalls[i].Name != tc.Name {
+		return fallback
+	}
+	return strconv.Itoa(planner.StepIndex) + "-" + strconv.Itoa(i)
+}
+
+// tool is the call as the recorder takes it, under id: the ACP kind the
+// alias table cannot derive from agy's snake_case names, the arguments with
+// their double encoding undone, and the target file of a write tool as its
+// location. The hook payload and the transcript describe one call the same
+// way, so the dispatcher's keys (id, name + arguments, written path) match.
+func (tc toolCall) tool(id string) *record.Tool {
+	return &record.Tool{
+		NativeID:  id,
+		Name:      tc.Name,
+		Kind:      toolKinds[tc.Name],
+		Arguments: decodeArgs(tc.Args),
+		Locations: tc.writeTargets(),
+		Status:    "completed",
+	}
 }
 
 // decodeString reads a string arg in either of agy's shapes: a plain JSON

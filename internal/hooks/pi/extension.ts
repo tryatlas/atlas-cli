@@ -9,6 +9,8 @@ import { execFile } from "node:child_process";
 
 const HOOK_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT = 4 * 1024 * 1024;
+// A tool result is forwarded as text, cut here; the session file keeps it whole.
+const MAX_RESULT = 64 * 1024;
 
 // A nested pi (a subagent spawns one per task, inside the project, where Pi
 // finds this same extension) must not report its lifecycle as the user's
@@ -20,7 +22,7 @@ function hookCommand(verb: string): string {
   return `if ! command -v atlas >/dev/null 2>&1; then exit 0; fi; exec atlas hooks pi ${verb}`;
 }
 
-function fire(verb: string, payload: Record<string, unknown>): Promise<void> {
+function run(verb: string, payload: Record<string, unknown>): Promise<void> {
   return new Promise((resolve) => {
     try {
       const child = execFile(
@@ -35,6 +37,33 @@ function fire(verb: string, payload: Record<string, unknown>): Promise<void> {
       resolve();
     }
   });
+}
+
+// Hooks run one at a time, in the order they were fired. Pi executes
+// parallel tool calls concurrently and fires their tool_result events
+// together; concurrent hook processes would race on the session's state
+// file and the store's writer lock, and a tool result could land after the
+// agent_end that closes its turn.
+let queue: Promise<void> = Promise.resolve();
+
+function fire(verb: string, payload: Record<string, unknown>): Promise<void> {
+  const next = queue.then(() => run(verb, payload));
+  queue = next.catch(() => {});
+  return next;
+}
+
+// resultText flattens a tool result's content to its text parts, truncated.
+function resultText(content: unknown): string {
+  if (typeof content === "string") return content.slice(0, MAX_RESULT);
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const c of content) {
+    if (c && typeof c === "object" && (c as { type?: unknown }).type === "text") {
+      const text = (c as { text?: unknown }).text;
+      if (typeof text === "string" && text !== "") parts.push(text);
+    }
+  }
+  return parts.join("\n").slice(0, MAX_RESULT);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -56,6 +85,25 @@ export default function (pi: ExtensionAPI) {
       cwd: ctx.cwd,
       session_file: ctx.sessionManager.getSessionFile(),
       prompt: event.prompt,
+    });
+  });
+
+  // Each completed tool call is delivered as it finishes, so the capture
+  // holds the turn's calls before the reply lands. The call id is the one
+  // the session file's toolCall carries, which is how the turn-end read
+  // knows not to record the call twice. A nested call (one tool running
+  // another) is not in the transcript and is left to its parent.
+  pi.on("tool_result", async (event, ctx) => {
+    if (event.parentToolCallId) return;
+    await fire("tool-result", {
+      type: "tool_result",
+      cwd: ctx.cwd,
+      session_file: ctx.sessionManager.getSessionFile(),
+      tool_call_id: event.toolCallId,
+      tool_name: event.toolName,
+      args: event.input ?? {},
+      result: resultText(event.content),
+      is_error: Boolean(event.isError),
     });
   });
 

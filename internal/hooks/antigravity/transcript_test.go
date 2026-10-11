@@ -249,6 +249,35 @@ func TestReadFromOffset(t *testing.T) {
 	}
 }
 
+func TestPendingPrompt(t *testing.T) {
+	if got := pendingPrompt(filepath.Join(t.TempDir(), "missing.jsonl")); got != "" {
+		t.Fatalf("missing transcript = %q", got)
+	}
+	// Both fixture turns are answered: nothing pending.
+	path := writeFixture(t)
+	if got := pendingPrompt(path); got != "" {
+		t.Fatalf("answered transcript = %q", got)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString(`{"step_index":12,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","content":"<USER_REQUEST>\nnext\n</USER_REQUEST>"}` + "\n" +
+		`{"step_index":13,"source":"SYSTEM","type":"CONVERSATION_HISTORY","status":"DONE"}` + "\n")
+	_ = f.Close()
+	if got := pendingPrompt(path); got != "next" {
+		t.Fatalf("pending = %q, want next", got)
+	}
+	// The live shape, cut after the prompt step as PreInvocation sees it.
+	live1 := filepath.Join(t.TempDir(), "transcript_full.jsonl")
+	if err := os.WriteFile(live1, []byte(strings.SplitAfter(live, "\n")[0]), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := pendingPrompt(live1); got != "Create a file named note.txt containing the word hello" {
+		t.Fatalf("live pending = %q", got)
+	}
+}
+
 func TestPromptUnwrap(t *testing.T) {
 	if got := prompt("no wrapper here "); got != "no wrapper here" {
 		t.Fatalf("prompt = %q", got)

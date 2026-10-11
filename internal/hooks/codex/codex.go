@@ -3,6 +3,7 @@
 package codex
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/hooks"
 )
 
@@ -111,6 +113,7 @@ type payload struct {
 	Prompt         string          `json:"prompt"`
 	ToolName       string          `json:"tool_name"`
 	ToolInput      json.RawMessage `json:"tool_input"`
+	ToolResponse   json.RawMessage `json:"tool_response"`
 	ToolUseID      string          `json:"tool_use_id"`
 }
 
@@ -134,14 +137,13 @@ func (Agent) Parse(verb string, raw []byte) (*hooks.Event, error) {
 	case VerbSessionEnd:
 		ev.Kind = hooks.SessionEnd
 	case VerbPostToolUse:
-		// Only the file-writing tool is a lifecycle event; shell and MCP
-		// calls are left to the transcript and the git status diff.
-		files := toolPatchFiles(p.ToolName, p.ToolInput)
-		if len(files) == 0 {
+		tool, files := p.toolOf()
+		if tool == nil && len(files) == 0 {
 			return nil, nil
 		}
 		ev.Kind = hooks.ToolUse
 		ev.ToolUseID = p.ToolUseID
+		ev.Tool = tool
 		for _, f := range files {
 			if !filepath.IsAbs(f) && p.Cwd != "" {
 				f = filepath.Join(p.Cwd, f)
@@ -154,6 +156,89 @@ func (Agent) Parse(verb string, raw []byte) (*hooks.Event, error) {
 	return ev, nil
 }
 
+// toolOf is the completed call a PostToolUse payload describes, shaped so
+// the dispatcher recognises the same call when it reads the rollout at turn
+// end (toolKeys in dispatch.go), plus the files an apply_patch wrote for the
+// git attribution.
+//
+// Codex 0.153 reports each tool the model used, in code mode the inner call
+// of the exec script: apply_patch with the envelope under command, and Bash
+// with the shell command under command. Its tool_use_id (exec-<uuid>) is not
+// the rollout's call_id (call_<hex>), so the id never matches and the other
+// keys must:
+//
+//   - apply_patch (also under its Write and Edit aliases, and a code-mode
+//     exec script that only calls tools.apply_patch once): the shape of
+//     transcript.go's patchTool, name "apply_patch", arguments {"patch": …}
+//     and the envelope's paths as locations, so both the arguments hash and
+//     every written path match;
+//   - Bash {"command": …}: the command text, which transcript.go reads out
+//     of a lone tools.exec_command({"cmd": …}) script (CodeModeCommand) or a
+//     shell call's command, matches as the shell key;
+//   - a code-mode exec script that does more: name "exec" with arguments
+//     {"input": script}, the rollout's custom_tool_call shape, so the
+//     arguments hash matches; the patches it holds still name their files;
+//   - anything else: the payload's name and arguments, re-encoded like the
+//     rollout's (canonJSON), so the arguments hash matches a function_call
+//     with the same arguments.
+//
+// The response is a string or an object; either is kept as text.
+func (p payload) toolOf() (*record.Tool, []string) {
+	var tool *record.Tool
+	if p.ToolUseID != "" && p.ToolName != "" {
+		tool = &record.Tool{NativeID: p.ToolUseID, Name: p.ToolName, Arguments: canonJSON(p.ToolInput), Status: "completed"}
+		if r := bytes.TrimSpace(p.ToolResponse); len(r) > 0 && string(r) != "null" {
+			var str string
+			if json.Unmarshal(r, &str) != nil {
+				str = string(r)
+			}
+			tool.Result = &str
+		}
+	}
+	var files []string
+	switch {
+	case isApplyPatch(p.ToolName):
+		patch := patchText(p.ToolInput)
+		files = PatchFiles(patch)
+		if tool != nil && len(files) > 0 {
+			tool.Name, tool.Arguments, tool.Locations = patchArgs(patch, files)
+		}
+	case p.ToolName == "exec":
+		script := patchText(p.ToolInput)
+		patches, others := CodeModePatches(script)
+		files = PatchFiles(strings.Join(patches, "\n"))
+		if tool == nil || script == "" {
+			break
+		}
+		if len(patches) == 1 && !others {
+			tool.Name, tool.Arguments, tool.Locations = patchArgs(patches[0], files)
+		} else {
+			tool.Arguments = hooks.Raw(map[string]string{"input": script})
+		}
+	}
+	return tool, files
+}
+
+// patchArgs is the apply_patch shape shared with transcript.go's patchTool.
+func patchArgs(patch string, files []string) (string, json.RawMessage, []string) {
+	return "apply_patch", hooks.Raw(map[string]string{"patch": patch}), files
+}
+
+// canonJSON re-encodes a JSON value with Go's encoder (sorted object keys,
+// no HTML escaping) so the same arguments hash the same whether they came
+// from a hook payload or the rollout; anything that is not JSON is kept.
+func canonJSON(raw json.RawMessage) json.RawMessage {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return raw
+	}
+	return hooks.Raw(v)
+}
+
 // isApplyPatch recognises Codex's file tool: apply_patch, plus the Write and
 // Edit matcher aliases Codex registers for Claude-style hook configs.
 func isApplyPatch(name string) bool {
@@ -162,19 +247,6 @@ func isApplyPatch(name string) bool {
 		return true
 	}
 	return false
-}
-
-// toolPatchFiles lists the files a PostToolUse touched: an apply_patch call
-// (also under the Write and Edit aliases), or a code-mode exec script that
-// calls tools.apply_patch. Anything else is left to the transcript and the
-// git status diff.
-func toolPatchFiles(name string, input json.RawMessage) []string {
-	text := patchText(input)
-	if isApplyPatch(name) {
-		return PatchFiles(text)
-	}
-	patches, _ := CodeModePatches(text)
-	return PatchFiles(strings.Join(patches, "\n"))
 }
 
 // codeModeCall is a tool call in a code-mode script: tools.<name>(.
@@ -200,6 +272,25 @@ func CodeModePatches(script string) (patches []string, others bool) {
 		patches = append(patches, patch)
 	}
 	return patches, others
+}
+
+// CodeModeCommand is the argument object of a code-mode script that calls
+// tools.exec_command({…}) exactly once and no other tool, when that object
+// is a JSON literal with a cmd string; the object is re-encoded with sorted
+// keys. Anything else is not a lone command.
+func CodeModeCommand(script string) (json.RawMessage, bool) {
+	calls := codeModeCall.FindAllStringSubmatchIndex(script, -1)
+	if len(calls) != 1 || script[calls[0][2]:calls[0][3]] != "exec_command" {
+		return nil, false
+	}
+	var obj map[string]any
+	if err := json.NewDecoder(strings.NewReader(script[calls[0][1]:])).Decode(&obj); err != nil {
+		return nil, false
+	}
+	if cmd, ok := obj["cmd"].(string); !ok || strings.TrimSpace(cmd) == "" {
+		return nil, false
+	}
+	return hooks.Raw(obj), true
 }
 
 // jsString decodes the JavaScript string literal that starts at s[i] with a

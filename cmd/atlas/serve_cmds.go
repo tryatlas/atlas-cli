@@ -191,8 +191,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			if err := hooks.Apply(ctx, h.Recorder, h.Listener.Memory, []hooks.Delivery{d}); err != nil {
 				return err
 			}
-			if d.Turn != nil && h.Sync != nil {
-				h.Sync.Force() // the turn goes to the cloud now, not at the next tick
+			if h.Sync != nil && !d.End {
+				h.Sync.Force() // the prompt, call or reply goes to the cloud now, not at the next tick
 			}
 			return nil
 		})

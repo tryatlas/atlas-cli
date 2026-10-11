@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/hooks"
 )
 
@@ -170,29 +171,77 @@ func TestParse(t *testing.T) {
 		t.Fatalf("%+v %v", ev, err)
 	}
 
+	// apply_patch: the call is shaped like the rollout's (transcript.go
+	// patchTool) so the dispatcher's dedupe matches by arguments and by the
+	// written paths; Files are absolute for the git attribution.
 	patch := "*** Begin Patch\n*** Add File: docs/new.md\n+hi\n*** Update File: main.go\n@@\n-a\n+b\n*** Delete File: /abs/old.txt\n*** End Patch"
-	ev, err = a.Parse(VerbPostToolUse, []byte(`{`+common+`,"tool_name":"apply_patch","tool_use_id":"call_1","tool_input":{"command":`+string(hooks.Raw(patch))+`}}`))
-	if err != nil || ev == nil || ev.Kind != hooks.ToolUse || ev.ToolUseID != "call_1" {
+	ev, err = a.Parse(VerbPostToolUse, []byte(`{`+common+`,"tool_name":"apply_patch","tool_use_id":"exec-1","tool_input":{"command":`+string(hooks.Raw(patch))+`},"tool_response":"Exit code: 0\nOutput:\nSuccess."}`))
+	if err != nil || ev == nil || ev.Kind != hooks.ToolUse || ev.ToolUseID != "exec-1" || ev.Tool == nil {
 		t.Fatalf("%+v %v", ev, err)
 	}
 	if want := []string{"/repo/docs/new.md", "/repo/main.go", "/abs/old.txt"}; strings.Join(ev.Files, ",") != strings.Join(want, ",") {
 		t.Fatalf("files %v", ev.Files)
 	}
+	want := patchTool("exec-1", patch)
+	if ev.Tool.NativeID != want.NativeID || ev.Tool.Name != want.Name || string(ev.Tool.Arguments) != string(want.Arguments) || strings.Join(ev.Tool.Locations, ",") != strings.Join(want.Locations, ",") || ev.Tool.Status != "completed" {
+		t.Fatalf("got %+v\nwant %+v", ev.Tool, want)
+	}
+	if ev.Tool.Result == nil || *ev.Tool.Result != "Exit code: 0\nOutput:\nSuccess." {
+		t.Fatalf("result %v", ev.Tool.Result)
+	}
+	if record.CanonicalToolName(ev.Tool.Name, "", "", ev.Tool.Arguments) != "Edit" {
+		t.Fatal("apply_patch should canonicalise to Edit")
+	}
 
-	// The Write and Edit aliases are the same tool.
+	// The Write and Edit aliases are the same tool; without a tool_use_id
+	// there is no call to deliver, but the files still count.
 	ev, err = a.Parse(VerbPostToolUse, []byte(`{`+common+`,"tool_name":"Edit","tool_input":{"patch":"*** Begin Patch\n*** Update File: a.go\n*** End Patch"}}`))
-	if err != nil || ev == nil || ev.Kind != hooks.ToolUse || len(ev.Files) != 1 || ev.Files[0] != "/repo/a.go" {
+	if err != nil || ev == nil || ev.Kind != hooks.ToolUse || ev.Tool != nil || len(ev.Files) != 1 || ev.Files[0] != "/repo/a.go" {
 		t.Fatalf("%+v %v", ev, err)
 	}
 
-	// A shell call is not a lifecycle event.
+	// A shell call (Codex reports a code-mode exec_command as Bash with the
+	// command text): the call is delivered with its arguments re-encoded
+	// and an object response kept as text; no files.
+	ev, err = a.Parse(VerbPostToolUse, []byte(`{`+common+`,"tool_name":"Bash","tool_use_id":"exec-2","tool_input":{"workdir":"/repo","command":"cat rt.txt"},"tool_response":{"output":"realtime\n","exit_code":0}}`))
+	if err != nil || ev == nil || ev.Kind != hooks.ToolUse || ev.Tool == nil || len(ev.Files) != 0 {
+		t.Fatalf("%+v %v", ev, err)
+	}
+	if ev.Tool.NativeID != "exec-2" || ev.Tool.Name != "Bash" || string(ev.Tool.Arguments) != `{"command":"cat rt.txt","workdir":"/repo"}` || ev.Tool.Status != "completed" {
+		t.Fatalf("%+v", ev.Tool)
+	}
+	if ev.Tool.Result == nil || *ev.Tool.Result != `{"output":"realtime\n","exit_code":0}` {
+		t.Fatalf("result %v", ev.Tool.Result)
+	}
+	// The same command in the rollout's code-mode script yields the same
+	// command text, which is the dispatcher's shell key.
+	args, ok := CodeModeCommand(`const r = await tools.exec_command({"cmd":"cat rt.txt","workdir":"/repo","yield_time_ms":10000});` + "\ntext(r.output);\n")
+	if !ok {
+		t.Fatal("expected a lone exec_command")
+	}
+	var hookArgs, rolloutArgs struct {
+		Command string `json:"command"`
+		Cmd     string `json:"cmd"`
+	}
+	if json.Unmarshal(ev.Tool.Arguments, &hookArgs) != nil || json.Unmarshal(args, &rolloutArgs) != nil || hookArgs.Command+hookArgs.Cmd != rolloutArgs.Command+rolloutArgs.Cmd {
+		t.Fatalf("hook %s, rollout %s", ev.Tool.Arguments, args)
+	}
+
+	// An MCP or other tool: delivered as named, a null response is no result.
+	ev, err = a.Parse(VerbPostToolUse, []byte(`{`+common+`,"tool_name":"mcp__atlas_memory__memory_search","tool_use_id":"exec-3","tool_input":{"query":"hooks"},"tool_response":null}`))
+	if err != nil || ev == nil || ev.Tool == nil || ev.Tool.Name != "mcp__atlas_memory__memory_search" || string(ev.Tool.Arguments) != `{"query":"hooks"}` || ev.Tool.Result != nil || len(ev.Files) != 0 {
+		t.Fatalf("%+v %v", ev, err)
+	}
+
+	// An apply_patch whose envelope names no file is still a call, just not
+	// an edit.
+	ev, err = a.Parse(VerbPostToolUse, []byte(`{`+common+`,"tool_name":"apply_patch","tool_use_id":"exec-4","tool_input":{"command":"garbage"}}`))
+	if err != nil || ev == nil || ev.Tool == nil || ev.Tool.Name != "apply_patch" || string(ev.Tool.Arguments) != `{"command":"garbage"}` || len(ev.Tool.Locations) != 0 || len(ev.Files) != 0 {
+		t.Fatalf("%+v %v", ev, err)
+	}
+
+	// Nothing to deliver: no id and no files.
 	ev, err = a.Parse(VerbPostToolUse, []byte(`{`+common+`,"tool_name":"shell","tool_input":{"command":["ls"]}}`))
-	if err != nil || ev != nil {
-		t.Fatalf("%+v %v", ev, err)
-	}
-
-	// Nor is an apply_patch whose envelope names no file.
-	ev, err = a.Parse(VerbPostToolUse, []byte(`{`+common+`,"tool_name":"apply_patch","tool_input":{"command":"garbage"}}`))
 	if err != nil || ev != nil {
 		t.Fatalf("%+v %v", ev, err)
 	}
@@ -302,16 +351,62 @@ func TestCodeModePatches(t *testing.T) {
 }
 
 func TestParseCodeModeExec(t *testing.T) {
-	// A PostToolUse for the exec tool whose script edits a file still names
-	// the file; a script that only runs a shell command does not.
+	// A PostToolUse for the exec tool itself, carrying the code-mode script.
 	common := `"session_id":"s1","transcript_path":"/t/rollout.jsonl","cwd":"/repo","model":"gpt-5-codex"`
-	script := `await tools.apply_patch("*** Begin Patch\n*** Add File: note.txt\n+hi\n*** End Patch");`
+	patch := "*** Begin Patch\n*** Add File: note.txt\n+hi\n*** End Patch"
+	script := `await tools.apply_patch(` + string(hooks.Raw(patch)) + `);`
+
+	// A script with one patch and nothing else is that apply_patch call,
+	// shaped like the rollout's.
 	ev, err := Agent{}.Parse(VerbPostToolUse, []byte(`{`+common+`,"tool_name":"exec","tool_use_id":"exec-1","tool_input":{"input":`+string(hooks.Raw(script))+`}}`))
 	if err != nil || ev == nil || ev.Kind != hooks.ToolUse || ev.ToolUseID != "exec-1" || len(ev.Files) != 1 || ev.Files[0] != "/repo/note.txt" {
 		t.Fatalf("%+v %v", ev, err)
 	}
+	want := patchTool("exec-1", patch)
+	if ev.Tool == nil || ev.Tool.NativeID != "exec-1" || ev.Tool.Name != "apply_patch" || string(ev.Tool.Arguments) != string(want.Arguments) || strings.Join(ev.Tool.Locations, ",") != "note.txt" {
+		t.Fatalf("got %+v\nwant %+v", ev.Tool, want)
+	}
+
+	// A script that also runs a command stays the exec call, in the
+	// rollout's {"input": script} shape, and still names the patched files.
+	mixed := `await tools.shell({command: 'ls'}); ` + script + ` await tools.apply_patch("*** Begin Patch\n*** Delete File: old.txt\n*** End Patch");`
+	ev, err = Agent{}.Parse(VerbPostToolUse, []byte(`{`+common+`,"tool_name":"exec","tool_use_id":"exec-2","tool_input":{"input":`+string(hooks.Raw(mixed))+`}}`))
+	if err != nil || ev == nil || ev.Tool == nil || ev.Tool.Name != "exec" || string(ev.Tool.Arguments) != string(hooks.Raw(map[string]string{"input": mixed})) {
+		t.Fatalf("%+v %v", ev, err)
+	}
+	if strings.Join(ev.Files, ",") != "/repo/note.txt,/repo/old.txt" {
+		t.Fatalf("files %v", ev.Files)
+	}
+
+	// A script that only runs a shell command is the exec call with no files.
+	ev, err = Agent{}.Parse(VerbPostToolUse, []byte(`{`+common+`,"tool_name":"exec","tool_use_id":"exec-3","tool_input":{"input":"await tools.shell({command: 'ls'})"}}`))
+	if err != nil || ev == nil || ev.Tool == nil || ev.Tool.Name != "exec" || len(ev.Files) != 0 {
+		t.Fatalf("%+v %v", ev, err)
+	}
+	// Without a tool_use_id a shell-only script is nothing.
 	ev, err = Agent{}.Parse(VerbPostToolUse, []byte(`{`+common+`,"tool_name":"exec","tool_input":{"input":"await tools.shell({command: 'ls'})"}}`))
 	if err != nil || ev != nil {
 		t.Fatalf("%+v %v", ev, err)
+	}
+}
+
+func TestCodeModeCommand(t *testing.T) {
+	args, ok := CodeModeCommand(`const r = await tools.exec_command({"cmd":"cat rt.txt","workdir":"/repo","yield_time_ms":10000,"max_output_tokens":2000});` + "\ntext(r.output);\n")
+	if !ok || string(args) != `{"cmd":"cat rt.txt","max_output_tokens":2000,"workdir":"/repo","yield_time_ms":10000}` {
+		t.Fatalf("%s %v", args, ok)
+	}
+	for _, bad := range []string{
+		`tools.exec_command({cmd: 'ls'})`, // a JS literal, not JSON
+		`tools.exec_command({"cmd":""})`,
+		`tools.exec_command({"workdir":"/repo"})`,
+		`tools.exec_command(args)`,
+		`tools.exec_command({"cmd":"ls"}); tools.exec_command({"cmd":"pwd"})`,
+		`tools.shell({"command":"ls"})`,
+		`tools.exec_command({"cmd":"ls"}); tools.apply_patch("*** Begin Patch\n*** Add File: a\n*** End Patch")`,
+		"",
+	} {
+		if args, ok := CodeModeCommand(bad); ok {
+			t.Fatalf("%s: %s", bad, args)
+		}
 	}
 }

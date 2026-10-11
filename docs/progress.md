@@ -1191,3 +1191,55 @@ Project within the drain's 3 s budget (signed in, cloud-bound; offline or
 rate-limited rows stay pending for the next drain). A turn delivered to
 `atlas serve` forces a drain instead of waiting for the 30 s tick. Before,
 without `atlas serve` nothing synced until `atlas capture sync`.
+
+## Per-event capture (ADR-0013 §9, 2026-10-12)
+
+The prompt opens the turn in the store as it is submitted; each tool call is
+recorded as the agent's post-tool hook fires (with the file it wrote); Stop
+closes the turn with the transcript's text runs and usage. Transcript tool
+items that duplicate a delivered call are dropped (same id, canonical name +
+arguments hash, shell command text, or every written path), and the files a
+delivered call wrote count as explained, so no synthetic "changes" call is
+made for them. Every delivery syncs: `atlas serve` forces a drain per event;
+a direct write drains within the sync budget (1 s for a post-tool hook, 3 s
+otherwise). A post-tool hook costs 60–180 ms locally.
+
+Verified live with Claude Code: `claude -p` with Write + Bash, directly and
+through `atlas serve`: one completed turn, the prompt row first, one tool
+row per call in order, the reply last, one file touch, no duplicates.
+
+Found by the per-agent live re-tests and fixed in the core:
+
+- Hooks of one session can fire concurrently (Pi runs six tool handlers at
+  once): the dispatcher now holds a per-session flock for the hook's
+  lifetime and writes state through a per-process temp name.
+- Delivered calls are tracked as key groups, each matching at most one
+  transcript item; when an agent's hook ids match its transcript ids (Claude,
+  Pi, OpenCode) ids decide alone, so two identical `sleep 4` calls stay two
+  calls; otherwise arguments (never empty `{}`), command text (string or
+  argv) or every written path decide (Codex, Copilot, Cursor).
+- A shell call's hook diffs git status right then: the files the command
+  changed are its touches, delivered with the call, and the baseline moves
+  on; no synthetic "changes" call for them.
+- A delivery carries the hook's own time, so a spooled one keeps it.
+
+Per-agent per-event results: Claude Code, Codex (code-mode `exec` scripts
+unwrapped to the inner `apply_patch`/`exec_command` so hook and rollout
+match), Copilot (no call ids in its payload; a derived id, matching by
+arguments, command or path), OpenCode (plugin `tool.execute.after`, ids
+equal the export's `callID`), Pi (`tool_result`, ids equal the session
+file's), Droid (PostToolUse added; untested live), Cursor (`afterFileEdit`
+and `afterShellExecution` become Write/Edit and Shell calls, matched by
+written path and command text; the TUI asks before MCP tools and
+non-allowlisted commands), Antigravity (PostToolUse carries no output and
+the id is derived from the planner step; the prompt is read from the
+transcript's pending USER_INPUT at PreInvocation so the turn opens). A
+transcript item matched by id completes the delivered row's result and
+status without sampling its writes again. Ordering within a turn is prompt,
+tool calls as they ran, then the reply's text runs at the end: the text is
+known only at Stop.
+
+## v0.3.0
+
+Per-event capture for all eight agents (above), the per-session lock, the
+dedupe by key groups, shell changes on the shell call, hook times kept.

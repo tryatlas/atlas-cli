@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/hooks"
 )
 
@@ -29,6 +30,7 @@ type Agent struct{}
 const (
 	VerbSessionStart     = "session-start"
 	VerbBeforeAgentStart = "before-agent-start"
+	VerbToolResult       = "tool-result"
 	VerbAgentEnd         = "agent-end"
 )
 
@@ -50,7 +52,7 @@ func (Agent) Binary() string { return "pi" }
 
 // Verbs are the hook verbs the extension invokes.
 func (Agent) Verbs() []string {
-	return []string{VerbSessionStart, VerbBeforeAgentStart, VerbAgentEnd}
+	return []string{VerbSessionStart, VerbBeforeAgentStart, VerbToolResult, VerbAgentEnd}
 }
 
 // ExtensionDir is the directory Pi loads the Atlas extension from; Pi
@@ -145,6 +147,25 @@ type payload struct {
 	SessionFile string `json:"session_file"`
 	SessionID   string `json:"session_id"`
 	Prompt      string `json:"prompt"`
+	// tool-result: the completed call, with its result as text.
+	ToolCallID string          `json:"tool_call_id"`
+	ToolName   string          `json:"tool_name"`
+	Args       json.RawMessage `json:"args"`
+	Result     *string         `json:"result"`
+	IsError    bool            `json:"is_error"`
+}
+
+// toolOf is the completed call a tool-result payload describes; nil when
+// the payload names no call.
+func (p payload) toolOf() *record.Tool {
+	if p.ToolCallID == "" || p.ToolName == "" {
+		return nil
+	}
+	t := &record.Tool{NativeID: p.ToolCallID, Name: p.ToolName, Arguments: p.Args, Result: p.Result, Status: "completed"}
+	if p.IsError {
+		t.Status = "failed"
+	}
+	return t
 }
 
 // Parse maps a hook verb and payload to an event. A payload naming no
@@ -170,6 +191,12 @@ func (Agent) Parse(verb string, raw []byte) (*hooks.Event, error) {
 	case VerbBeforeAgentStart:
 		ev.Kind = hooks.TurnStart
 		ev.Prompt = p.Prompt
+	case VerbToolResult:
+		ev.Kind = hooks.ToolUse
+		ev.Tool = p.toolOf()
+		if ev.Tool == nil {
+			return nil, nil
+		}
 	case VerbAgentEnd:
 		ev.Kind = hooks.TurnEnd
 	default:

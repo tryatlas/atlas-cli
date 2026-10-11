@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/hooks"
 )
 
@@ -43,7 +44,7 @@ func TestInstallIntoEmptyProject(t *testing.T) {
 	if string(obj["version"]) != "1" {
 		t.Fatalf("version %s", obj["version"])
 	}
-	if len(hs) != 5 {
+	if len(hs) != 7 {
 		t.Fatalf("events %v", hs)
 	}
 	for _, h := range installed {
@@ -105,8 +106,9 @@ func TestInstallKeepsUserHooksAndPrunesStale(t *testing.T) {
 	if ss[1]["command"] != command(VerbSessionStart) {
 		t.Fatalf("stale entry not replaced: %v", ss[1])
 	}
-	if len(hs["afterFileEdit"]) != 1 || hs["afterFileEdit"][0]["command"] != "./lint.sh" {
-		t.Fatalf("user event lost: %v", hs["afterFileEdit"])
+	// Atlas installs into afterFileEdit too: the user's entry stays first.
+	if fe := hs["afterFileEdit"]; len(fe) != 2 || fe[0]["command"] != "./lint.sh" || fe[1]["command"] != command(VerbAfterFileEdit) {
+		t.Fatalf("user event lost or not appended to: %v", hs["afterFileEdit"])
 	}
 	if _, ok := hs["preToolUse"]; ok {
 		t.Fatalf("stale Atlas-only event kept: %v", hs["preToolUse"])
@@ -135,7 +137,7 @@ func TestInstallKeepsUserHooksAndPrunesStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	obj, hs = readHooks(t, root)
-	if len(hs) != 2 || len(hs["sessionStart"]) != 1 || hs["sessionStart"][0]["command"] != "echo mine" || len(hs["afterFileEdit"]) != 1 {
+	if len(hs) != 2 || len(hs["sessionStart"]) != 1 || hs["sessionStart"][0]["command"] != "echo mine" || len(hs["afterFileEdit"]) != 1 || hs["afterFileEdit"][0]["command"] != "./lint.sh" {
 		t.Fatalf("after uninstall %v", hs)
 	}
 	if string(obj["version"]) != "1" {
@@ -261,6 +263,47 @@ func TestParseLiveCLIPayloads(t *testing.T) {
 		t.Fatalf("beforeSubmitPrompt %+v %v", ev, err)
 	}
 
+	// The tool hooks, recorded from the same CLI: a new file, a replacement
+	// in it, and a shell command with its output.
+	ev, err = a.Parse(VerbAfterFileEdit, []byte(`{"conversation_id":"`+id+`","generation_id":"9c3d906a-6fae-4aca-8800-640b0373b6c2","model":"default","file_path":"/private/tmp/hooks-cursor/probe.txt","edits":[{"old_string":"","new_string":"alpha\n"}],`+tail+`,"hook_event_name":"afterFileEdit","transcript_path":"`+named+`"}`))
+	if err != nil || ev.Kind != hooks.ToolUse || ev.Tool == nil || ev.Transcript != named || ev.SessionID != id {
+		t.Fatalf("afterFileEdit %+v %v", ev, err)
+	}
+	w := ev.Tool
+	if w.Name != "Write" || w.Status != "completed" || string(w.Arguments) != `{"contents":"alpha\n","path":"/private/tmp/hooks-cursor/probe.txt"}` || !strings.HasPrefix(w.NativeID, "9c3d906a-6fae-4aca-8800-640b0373b6c2-edit-") {
+		t.Fatalf("new file %+v %s", w, w.Arguments)
+	}
+	if got := record.WritePaths(w.Arguments, nil); len(got) != 1 || got[0] != "/private/tmp/hooks-cursor/probe.txt" {
+		t.Fatalf("write paths %q", got)
+	}
+	ev, err = a.Parse(VerbAfterFileEdit, []byte(`{"conversation_id":"`+id+`","generation_id":"9c3d906a-6fae-4aca-8800-640b0373b6c2","model":"default","file_path":"/private/tmp/hooks-cursor/probe.txt","edits":[{"old_string":"alpha","new_string":"beta"}],`+tail+`,"hook_event_name":"afterFileEdit","transcript_path":"`+named+`"}`))
+	if err != nil || ev.Kind != hooks.ToolUse || ev.Tool == nil {
+		t.Fatalf("afterFileEdit (edit) %+v %v", ev, err)
+	}
+	if e := ev.Tool; e.Name != "Edit" || string(e.Arguments) != `{"edits":[{"old_string":"alpha","new_string":"beta"}],"new_string":"beta","old_string":"alpha","path":"/private/tmp/hooks-cursor/probe.txt"}` {
+		t.Fatalf("edit %+v %s", e, e.Arguments)
+	}
+	if record.CanonicalToolName(ev.Tool.Name, "", "", ev.Tool.Arguments) != "Edit" || record.EditPatch(ev.Tool.Arguments, "") == "" {
+		t.Fatalf("edit should canonicalise to Edit with a patch: %s", ev.Tool.Arguments)
+	}
+	ev, err = a.Parse(VerbAfterShell, []byte(`{"conversation_id":"`+id+`","generation_id":"9c3d906a-6fae-4aca-8800-640b0373b6c2","model":"default","command":"cat probe.txt","output":"beta\n","duration":13261.171,"sandbox":false,`+tail+`,"hook_event_name":"afterShellExecution","transcript_path":"`+named+`"}`))
+	if err != nil || ev.Kind != hooks.ToolUse || ev.Tool == nil {
+		t.Fatalf("afterShellExecution %+v %v", ev, err)
+	}
+	if sh := ev.Tool; sh.Name != "Shell" || string(sh.Arguments) != `{"command":"cat probe.txt"}` || sh.Result == nil || *sh.Result != "beta\n" || sh.Status != "completed" || !strings.HasPrefix(sh.NativeID, "9c3d906a-6fae-4aca-8800-640b0373b6c2-shell-") {
+		t.Fatalf("shell %+v %s", sh, sh.Arguments)
+	}
+	if record.CanonicalToolName(ev.Tool.Name, "", "", ev.Tool.Arguments) != "Bash" {
+		t.Fatal("shell should canonicalise to Bash")
+	}
+	// A tool hook without its call (nothing edited, nothing run) is no event.
+	if ev, err := a.Parse(VerbAfterFileEdit, []byte(`{"conversation_id":"`+id+`",`+tail+`}`)); ev != nil || err != nil {
+		t.Fatalf("empty afterFileEdit %+v %v", ev, err)
+	}
+	if ev, err := a.Parse(VerbAfterShell, []byte(`{"conversation_id":"`+id+`","command":"",`+tail+`}`)); ev != nil || err != nil {
+		t.Fatalf("empty afterShellExecution %+v %v", ev, err)
+	}
+
 	ev, err = a.Parse(VerbStop, []byte(`{"conversation_id":"`+id+`","generation_id":"055d3bc7","model":"default","status":"completed","loop_count":0,"input_tokens":31219,"output_tokens":230,"cache_read_tokens":15488,"cache_write_tokens":0,`+tail+`,"hook_event_name":"stop","transcript_path":"`+named+`"}`))
 	if err != nil || ev.Kind != hooks.TurnEnd || ev.TurnEndFailed || ev.Transcript != named || ev.Usage == nil {
 		t.Fatalf("stop %+v %v", ev, err)
@@ -329,7 +372,7 @@ func TestIdentity(t *testing.T) {
 	if a.Response(hooks.SessionStart, "hello") != nil {
 		t.Fatal("Cursor shows no banner")
 	}
-	if len(a.Verbs()) != 5 {
+	if len(a.Verbs()) != 7 {
 		t.Fatal(a.Verbs())
 	}
 	if got, ok := hooks.Get(ID); !ok || got.ID() != ID {

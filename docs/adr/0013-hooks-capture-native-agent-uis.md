@@ -75,9 +75,21 @@ the product.
    group until their removal is agreed, and are no longer documented as the
    product.
 
+9. **Per event, not per turn** (added 2026-10-12). The prompt opens the turn
+   in the store as it is submitted; each tool call is recorded as the
+   agent's post-tool hook fires (Claude Code, Codex, Copilot, Droid and
+   Antigravity have a generic one; Cursor's file-edit and shell hooks,
+   OpenCode's plugin and Pi's extension carry the same information); the
+   turn closes at Stop with the transcript's text and usage, and transcript
+   tool items that duplicate a delivered call are dropped (same id,
+   arguments, shell command or written paths). Each delivery syncs. Token
+   streaming is out of reach for hooks.
+
 ## Consequences
 
-- Native-UI sessions get file touches and checkpoints again, live.
+- Native-UI sessions get file touches and checkpoints again, live: the
+  prompt and each tool call reach the cloud within seconds; the reply at
+  turn end.
 - One integration per agent is the price; the external-agent protocol is
   a later addition.
 - A hook-captured turn's file changes are attributed to the tool that wrote

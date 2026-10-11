@@ -221,6 +221,9 @@ type Tool struct {
 	Binary    []byte
 	Locations []string
 	Diffs     []Diff // ACP diff content blocks
+	// NoSample says the call's writes were already sampled (a hook delivered
+	// it): this sighting only completes the row (result, status).
+	NoSample bool `json:"no_sample,omitempty"`
 }
 
 // ToolCall upserts the call; on its first completed sighting it samples the

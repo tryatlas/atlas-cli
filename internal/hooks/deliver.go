@@ -37,7 +37,7 @@ func SpoolDir(root string) string { return filepath.Join(Dir(root), "spool") }
 // Deliver is the default Dispatcher.Deliver. afterDirect, when set, runs
 // after a direct write with the store still open: the caller syncs the new
 // rows to the cloud there, so a turn does not wait for the next atlas serve.
-func Deliver(version string, afterDirect func(ctx context.Context, st *store.Store)) func(ctx context.Context, d Delivery) error {
+func Deliver(version string, afterDirect func(ctx context.Context, st *store.Store, d Delivery)) func(ctx context.Context, d Delivery) error {
 	return func(ctx context.Context, d Delivery) error {
 		if rf := listener.ReadRunFile(d.Root); rf != nil {
 			if err := postHook(ctx, rf.Socket, d); err == nil {
@@ -70,6 +70,17 @@ func Apply(ctx context.Context, rec *record.Recorder, mem *server.Server, ds []D
 		case d.End:
 			if mem != nil {
 				mem.SessionEnded(ctx, g)
+			}
+		case d.Open != nil:
+			if _, err := rec.OpenTurn(ctx, d.Session, d.Open.Prompt, d.Open.At); err != nil {
+				return err
+			}
+		case d.Tool != nil:
+			if err := rec.RecordTool(ctx, d.Session, *d.Tool, d.Changed, d.At); err != nil {
+				return err
+			}
+			if mem != nil {
+				foldChanges(ctx, mem, g, d.Root, &record.CapturedTurn{Items: []record.CapturedItem{{Tool: d.Tool}}, Changed: d.Changed})
 			}
 		case d.Turn != nil:
 			if _, err := rec.RecordTurn(ctx, d.Session, *d.Turn); err != nil {
@@ -116,7 +127,7 @@ func foldChanges(ctx context.Context, mem *server.Server, g server.Grant, root s
 
 // applyDirect takes the writer lock for the duration of the write, drains
 // the spool first, then applies ds.
-func applyDirect(ctx context.Context, version, root string, ds []Delivery, after func(ctx context.Context, st *store.Store)) error {
+func applyDirect(ctx context.Context, version, root string, ds []Delivery, after func(ctx context.Context, st *store.Store, d Delivery)) error {
 	lock, err := store.Lock(root)
 	if err != nil {
 		return err
@@ -138,7 +149,9 @@ func applyDirect(ctx context.Context, version, root string, ds []Delivery, after
 	}
 	ClearLastError(root)
 	if after != nil {
-		after(ctx, st)
+		for _, d := range ds {
+			after(ctx, st, d)
+		}
 	}
 	return nil
 }

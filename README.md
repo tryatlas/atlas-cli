@@ -42,12 +42,16 @@ Agents run their project hooks only for a project you trust: Codex, Copilot
 and Pi each ask once in their own UI. Keep `atlas` current on PATH, including
 `~/.local/bin`, which some agents put first.
 
-At each turn end the hook reads the agent's transcript from where the turn
-started, diffs `git status`, and records the prompt, the reply, the tool calls
-with the files they wrote, token usage and the model. The hook writes to the
-store itself and sends the turn to the cloud Project right away, or hands it to
-a running `atlas serve` (which syncs it at once), or spools it when the
-desktop app has the folder open. A hook never fails the agent: errors go to
+Capture is per event. The prompt opens the turn the moment you submit it;
+each tool call lands as the agent's post-tool hook fires, with the file it
+wrote; at turn end the hook reads the agent's transcript from where the turn
+started, diffs `git status`, and closes the turn with the reply, token usage
+and the model. Every event goes to the cloud Project right away: the hook
+writes the store itself and syncs, or hands the event to a running
+`atlas serve` (which syncs it at once), or spools it when the desktop app has
+the folder open. Someone watching the Project sees the prompt, then the tool
+cards one by one, then the reply. Text is not streamed token by token: no
+agent exposes a hook for that. A hook never fails the agent: errors go to
 `.atlas/cli-hooks.log` and `atlas status`.
 
 | agent | hook written to | memory server written to |

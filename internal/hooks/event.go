@@ -13,6 +13,7 @@ import (
 	"os"
 	"regexp"
 
+	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 )
 
@@ -63,6 +64,7 @@ type Event struct {
 	Model      string
 	Usage      *store.TokenTotals // a hook-provided usage total for the turn
 	Files      []string           // ToolUse: files the tool changed
+	Tool       *record.Tool       // ToolUse: the completed call, when the payload carries it
 	ToolUseID  string
 	// TurnEndFailed marks a turn that ended on an API error.
 	TurnEndFailed bool

@@ -1,7 +1,9 @@
 package hooks
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -25,14 +27,28 @@ type Dispatcher struct {
 	Banner string
 }
 
-// Delivery is what a hook hands to the capture side: a session start, a
-// turn, or a session end for one native session.
+// Delivery is what a hook hands to the capture side for one native session:
+// a session start, an opening prompt, one completed tool call, the turn's
+// close (or a whole turn), or a session end.
 type Delivery struct {
 	Root    string               `json:"root"`
 	Session record.Session       `json:"session"`
 	Start   bool                 `json:"start,omitempty"`
+	Open    *OpenTurn            `json:"open,omitempty"`
+	Tool    *record.Tool         `json:"tool,omitempty"`
 	Turn    *record.CapturedTurn `json:"turn,omitempty"`
 	End     bool                 `json:"end,omitempty"`
+	// Changed are Project-relative paths git saw change while Tool (a
+	// shell call) ran; they are recorded as its file touches.
+	Changed []string `json:"changed,omitempty"`
+	// At is when the hook fired, so a spooled delivery keeps its time.
+	At time.Time `json:"at,omitempty"`
+}
+
+// OpenTurn is the prompt that opens a turn as it is submitted.
+type OpenTurn struct {
+	Prompt string    `json:"prompt"`
+	At     time.Time `json:"at"`
 }
 
 // Run handles one event. Every error is logged and swallowed by the caller;
@@ -44,6 +60,13 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 	if !ValidSessionID(ev.SessionID) {
 		return nil, ErrBadSessionID
 	}
+	// Hooks of one session can fire concurrently (parallel tool calls):
+	// one at a time per session, so the state's read-modify-write holds.
+	unlock, err := lockSession(d.Root, a.ID(), ev.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	now := d.Now()
 	st, err := LoadState(d.Root, a.ID(), ev.SessionID)
 	if err != nil {
@@ -66,7 +89,7 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 		if err := st.Save(d.Root); err != nil {
 			return nil, err
 		}
-		_ = d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, Start: true})
+		_ = d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, Start: true, At: now})
 	}
 
 	switch ev.Kind {
@@ -90,18 +113,58 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 		}
 		st.InTurn = true
 		st.Prompt = ev.Prompt
-		st.ToolFiles = nil
+		st.ToolFiles, st.Delivered, st.Tools, st.Open = nil, nil, nil, false
 		st.Status = gitStatus(ctx, d.Root)
 		if r := a.Reader(); r != nil && st.Transcript != "" {
 			if pos, err := r.Position(st.Transcript); err == nil {
 				st.Offset = pos
 			}
 		}
+		if ev.Prompt != "" {
+			// The prompt opens the turn now; tool calls follow as they
+			// complete, and the reply closes it (per-event capture).
+			st.Open = true
+			if err := st.Save(d.Root); err != nil {
+				return nil, err
+			}
+			return nil, d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, Open: &OpenTurn{Prompt: ev.Prompt, At: now}, At: now})
+		}
 		return nil, st.Save(d.Root)
 
 	case ToolUse:
 		for _, f := range ev.Files {
 			st.ToolFiles = append(st.ToolFiles, relPath(d.Root, f))
+		}
+		if ev.Tool != nil && ev.Tool.NativeID != "" {
+			if !st.Open {
+				st.Tools = append(st.Tools, *ev.Tool)
+				return nil, st.Save(d.Root)
+			}
+			st.Delivered = append(st.Delivered, toolKeys(*ev.Tool))
+			for _, p := range record.WritePaths(ev.Tool.Arguments, ev.Tool.Locations, ev.Tool.Diffs...) {
+				rel, _ := record.ProjectPath(d.Root, p)
+				st.Delivered = append(st.Delivered, []string{"path:" + rel}) // explained: not a shell change
+			}
+			dl := Delivery{Root: d.Root, Session: sess, Tool: ev.Tool, At: now}
+			if record.CanonicalToolName(ev.Tool.Name, ev.Tool.Title, ev.Tool.Kind, ev.Tool.Arguments) == "Bash" && st.Status != nil {
+				// What the shell command changed is known now: its touches,
+				// and the baseline for the rest of the turn moves past them.
+				after := gitStatus(ctx, d.Root)
+				explained := explainedPaths(st.Delivered)
+				for _, p := range changedSince(d.Root, st.Status, after) {
+					if !explained[p] {
+						dl.Changed = append(dl.Changed, p)
+						st.Delivered = append(st.Delivered, []string{"path:" + p})
+					}
+				}
+				if after != nil {
+					st.Status = after
+				}
+			}
+			if err := st.Save(d.Root); err != nil {
+				return nil, err
+			}
+			return nil, d.deliver(ctx, st, dl)
 		}
 		return nil, st.Save(d.Root)
 
@@ -112,6 +175,7 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 			return nil, err
 		}
 		st.InTurn, st.Prompt, st.ToolFiles, st.Status = false, "", nil, nil
+		st.Open, st.Delivered, st.Tools = false, nil, nil
 		if turn == nil {
 			return nil, st.Save(d.Root)
 		}
@@ -120,7 +184,7 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 			return nil, err
 		}
 		sess.Model = st.Model
-		return nil, d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, Turn: turn})
+		return nil, d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, Turn: turn, At: now})
 
 	case Compaction:
 		return nil, st.Save(d.Root)
@@ -133,7 +197,7 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 			if turn, err := d.turnEnd(ctx, a, st, ev); err == nil && turn != nil {
 				st.Turn = 1
 				sess.Model = st.Model
-				_ = d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, Turn: turn})
+				_ = d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, Turn: turn, At: now})
 			}
 		}
 		// The state stays (atlas agents sessions lists it with its resume
@@ -142,7 +206,7 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 		if err := st.Save(d.Root); err != nil {
 			return nil, err
 		}
-		return nil, d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, End: true})
+		return nil, d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, End: true, At: now})
 
 	case SubagentStart, SubagentEnd:
 		return nil, st.Save(d.Root)
@@ -185,9 +249,19 @@ func (d *Dispatcher) turnEnd(ctx context.Context, a Agent, st *State, ev *Event)
 	if ev.Model != "" {
 		turn.Model = ev.Model
 	}
+	// Tool calls already delivered during the open turn are not recorded
+	// again from the transcript; calls the hooks saw while no turn was open
+	// join now.
+	if st.Open {
+		turn.Open = true
+		turn.Items = dropDelivered(turn.Items, st.Delivered)
+	}
+	for i := range st.Tools {
+		turn.Items = append(turn.Items, record.CapturedItem{Tool: &st.Tools[i]})
+	}
 	// Files the agent's tool hooks named, then whatever git says changed
-	// during the turn that no tool call explains.
-	explained := map[string]bool{}
+	// during the turn that no tool call explains (delivered ones included).
+	explained := explainedPaths(st.Delivered)
 	for _, it := range turn.Items {
 		if it.Tool == nil {
 			continue
@@ -210,10 +284,166 @@ func (d *Dispatcher) turnEnd(ctx context.Context, a Agent, st *State, ev *Event)
 			}
 		}
 	}
-	if turn.Prompt == "" && len(turn.Items) == 0 && len(turn.Changed) == 0 && !ev.TurnEndFailed {
+	if turn.Prompt == "" && len(turn.Items) == 0 && len(turn.Changed) == 0 && !ev.TurnEndFailed && !turn.Open {
 		return nil, nil // nothing happened (a turn that only read)
 	}
 	return turn, nil
+}
+
+// toolKeys identifies a tool call across the hook payload and the
+// transcript, whose ids and argument shapes may differ: the agent's call
+// id; the canonical name with a hash of the arguments (unless they are
+// empty); for a shell call its command text (a string, or an argv array
+// joined); for a call that writes files, each written path.
+func toolKeys(t record.Tool) []string {
+	keys := []string{"id:" + t.NativeID}
+	name := record.CanonicalToolName(t.Name, t.Title, t.Kind, t.Arguments)
+	if len(bytes.TrimSpace(t.Arguments)) > 0 {
+		var compact bytes.Buffer
+		if json.Compact(&compact, t.Arguments) == nil && compact.String() != "{}" && compact.String() != "null" {
+			keys = append(keys, "args:"+strings.ToLower(name)+":"+store.SHA256Hex(compact.Bytes()))
+		}
+		var m struct {
+			Command json.RawMessage `json:"command"`
+			Cmd     json.RawMessage `json:"cmd"`
+		}
+		if json.Unmarshal(t.Arguments, &m) == nil {
+			if c := commandText(m.Command) + commandText(m.Cmd); c != "" {
+				keys = append(keys, "cmd:"+store.SHA256Hex([]byte(c)))
+			}
+		}
+	}
+	if record.WritesFiles(name) || len(t.Diffs) > 0 {
+		for _, p := range record.WritePaths(t.Arguments, t.Locations, t.Diffs...) {
+			keys = append(keys, "write:"+filepath.ToSlash(filepath.Clean(p)))
+		}
+	}
+	return keys
+}
+
+// commandText flattens a command argument: a string, or an argv array.
+func commandText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return strings.TrimSpace(s)
+	}
+	var argv []string
+	if json.Unmarshal(raw, &argv) == nil {
+		return strings.TrimSpace(strings.Join(argv, " "))
+	}
+	return ""
+}
+
+// explainedPaths are the Project paths delivered tool calls wrote.
+func explainedPaths(delivered [][]string) map[string]bool {
+	out := map[string]bool{}
+	for _, g := range delivered {
+		for _, k := range g {
+			if rel, ok := strings.CutPrefix(k, "path:"); ok {
+				out[rel] = true
+			}
+		}
+	}
+	return out
+}
+
+// dropDelivered removes the transcript's tool items already recorded from a
+// hook, each delivered call matching at most one item. When the agent's hook
+// ids match its transcript ids (any item's id was delivered) ids decide
+// alone, so two distinct calls with the same command stay distinct; an item
+// matched by id is kept, marked NoSample, so its result completes the row.
+// Otherwise an item matches a delivered call by arguments, by command text,
+// or by every path it wrote, and is dropped.
+func dropDelivered(items []record.CapturedItem, delivered [][]string) []record.CapturedItem {
+	groups := make([][]string, 0, len(delivered))
+	for _, g := range delivered {
+		if len(g) > 0 && !strings.HasPrefix(g[0], "path:") {
+			groups = append(groups, g)
+		}
+	}
+	has := func(g []string, key string) bool {
+		for _, k := range g {
+			if k == key {
+				return true
+			}
+		}
+		return false
+	}
+	idsMatch := false
+	for _, it := range items {
+		if it.Tool == nil {
+			continue
+		}
+		for _, g := range groups {
+			if has(g, "id:"+it.Tool.NativeID) {
+				idsMatch = true
+			}
+		}
+	}
+	match := func(t record.Tool) int {
+		keys := toolKeys(t)
+		for i, g := range groups {
+			if has(g, keys[0]) {
+				return i
+			}
+		}
+		if idsMatch {
+			return -1
+		}
+		for i, g := range groups {
+			for _, k := range keys[1:] {
+				if !strings.HasPrefix(k, "write:") && has(g, k) {
+					return i
+				}
+			}
+		}
+		// Every written path delivered (possibly by several calls): a
+		// duplicate too; the first writing group is consumed.
+		writes, first := 0, -1
+		for _, k := range keys {
+			if !strings.HasPrefix(k, "write:") {
+				continue
+			}
+			found := -1
+			for i, g := range groups {
+				if has(g, k) {
+					found = i
+					break
+				}
+			}
+			if found < 0 {
+				return -1
+			}
+			writes++
+			if first < 0 {
+				first = found
+			}
+		}
+		if writes > 0 {
+			return first
+		}
+		return -1
+	}
+	kept := items[:0]
+	for _, it := range items {
+		if it.Tool != nil {
+			if i := match(*it.Tool); i >= 0 {
+				byID := has(groups[i], "id:"+it.Tool.NativeID)
+				groups = append(groups[:i], groups[i+1:]...)
+				if !byID {
+					continue
+				}
+				// Same row: let the transcript complete it (result, status)
+				// without sampling its writes again.
+				it.Tool.NoSample = true
+			}
+		}
+		kept = append(kept, it)
+	}
+	return kept
 }
 
 // deliver hands off to the store; a failure spools (deliver.go) and is

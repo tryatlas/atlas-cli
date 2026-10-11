@@ -22,7 +22,11 @@ import (
 type CapturedTurn struct {
 	Prompt string         `json:"prompt"`
 	Items  []CapturedItem `json:"items,omitempty"`
-	Model  string         `json:"model,omitempty"`
+	// Open says the turn was opened earlier by OpenTurn (and may already
+	// hold tool calls from RecordTool): complete it instead of starting a
+	// new one.
+	Open  bool   `json:"open,omitempty"`
+	Model string `json:"model,omitempty"`
 	// Usage is the turn's token usage when the transcript or the hook gave
 	// one; nil records nothing.
 	Usage *store.TokenTotals `json:"usage,omitempty"`
@@ -58,9 +62,11 @@ func (r *Recorder) RecordTurn(ctx context.Context, s Session, t CapturedTurn) (i
 	if at.IsZero() {
 		at = r.Now()
 	}
-	l.turn++
-	if err := r.Store.BeginTurn(ctx, l.id, l.turn, at); err != nil {
-		return 0, err
+	if !t.Open || l.turn == 0 {
+		l.turn++
+		if err := r.Store.BeginTurn(ctx, l.id, l.turn, at); err != nil {
+			return 0, err
+		}
 	}
 	stripped := StripUser(t.Prompt)
 	if strings.TrimSpace(stripped) != "" {
@@ -132,25 +138,8 @@ func (r *Recorder) RecordTurn(ctx context.Context, s Session, t CapturedTurn) (i
 			}
 			call = id
 		}
-		inHead := headFiles(r.Root)
-		for _, p := range t.Changed {
-			ft := store.FileTouch{ToolCallID: call, SessionID: l.id, TurnSeq: l.turn, Path: p, ExistedBefore: inHead[p]}
-			if filepath.IsAbs(p) {
-				ft.OutOfRepo = true
-			}
-			abs := p
-			if !ft.OutOfRepo {
-				abs = filepath.Join(r.Root, filepath.FromSlash(p))
-			}
-			if data, err := os.ReadFile(abs); err == nil { //nolint:gosec // G304: a path git reported changed
-				h := store.SHA256Hex(data)
-				ft.SHA256After, ft.SketchAfter = &h, Sketch(data)
-			} else {
-				ft.Deleted = true
-			}
-			if err := r.Store.AddFileTouch(ctx, ft, at); err != nil {
-				return l.turn, err
-			}
+		if err := r.touchPaths(ctx, l, call, t.Changed, at); err != nil {
+			return l.turn, err
 		}
 	}
 	if t.Usage != nil {
@@ -222,11 +211,104 @@ func (r *Recorder) recordCapturedTool(ctx context.Context, l *live, t Tool, at t
 	if err != nil {
 		return "", name, err
 	}
-	if status == "completed" && (WritesFiles(name) || len(t.Diffs) > 0) && !l.touched[t.NativeID] {
+	if status == "completed" && !t.NoSample && (WritesFiles(name) || len(t.Diffs) > 0) && !l.touched[t.NativeID] {
 		l.touched[t.NativeID] = true
 		if err := r.sampleWrites(ctx, l, id, t.NativeID, WritePaths(t.Arguments, t.Locations, t.Diffs...), t.Arguments, t.Diffs, at); err != nil {
 			return id, name, err
 		}
 	}
 	return id, name, nil
+}
+
+// OpenTurn starts a turn as the prompt is submitted (the per-event path): the
+// turn row, the title on the first turn, and the user message. The rest of
+// the turn arrives through RecordTool and a CapturedTurn with Open set.
+func (r *Recorder) OpenTurn(ctx context.Context, s Session, prompt string, at time.Time) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.enabled(ctx) {
+		return 0, nil
+	}
+	l, err := r.session(ctx, s)
+	if err != nil {
+		return 0, err
+	}
+	if at.IsZero() {
+		at = r.Now()
+	}
+	l.turn++
+	if err := r.Store.BeginTurn(ctx, l.id, l.turn, at); err != nil {
+		return 0, err
+	}
+	stripped := StripUser(prompt)
+	if strings.TrimSpace(stripped) == "" {
+		return l.turn, nil
+	}
+	if flat, err := redact.Flat(stripped); err == nil {
+		if title := Title(flat.Text); title != "" {
+			_ = r.Store.SetTitleIfAbsent(ctx, l.id, title)
+		}
+	}
+	body, ok := r.redactAuto(ctx, l, stripped)
+	if !ok {
+		return l.turn, nil
+	}
+	_, err = r.Store.RecordMessage(ctx, store.Message{SessionID: l.id, TurnSeq: l.turn,
+		NativeID: fmt.Sprintf("prompt-%d-%s", l.turn, store.SHA256Hex([]byte(prompt))),
+		Role:     "user", Mode: "text", Body: body, CreatedAt: at})
+	return l.turn, err
+}
+
+// RecordTool upserts one tool call into the session's open turn as the
+// agent's post-tool hook reports it, sampling the files it wrote; changed
+// are the Project paths git saw change while a shell call ran, recorded as
+// its touches. With no open turn it opens one.
+func (r *Recorder) RecordTool(ctx context.Context, s Session, t Tool, changed []string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.enabled(ctx) {
+		return nil
+	}
+	l, err := r.session(ctx, s)
+	if err != nil {
+		return err
+	}
+	if at.IsZero() {
+		at = r.Now()
+	}
+	if l.turn == 0 {
+		l.turn++
+		if err := r.Store.BeginTurn(ctx, l.id, l.turn, at); err != nil {
+			return err
+		}
+	}
+	id, _, err := r.recordCapturedTool(ctx, l, t, at)
+	if err != nil || id == "" || len(changed) == 0 {
+		return err
+	}
+	return r.touchPaths(ctx, l, id, changed, at)
+}
+
+// touchPaths records file touches for paths changed outside a known write.
+func (r *Recorder) touchPaths(ctx context.Context, l *live, callID string, paths []string, at time.Time) error {
+	inHead := headFiles(r.Root)
+	for _, p := range paths {
+		ft := store.FileTouch{ToolCallID: callID, SessionID: l.id, TurnSeq: l.turn, Path: p, ExistedBefore: inHead[p]}
+		abs := p
+		if filepath.IsAbs(p) {
+			ft.OutOfRepo = true
+		} else {
+			abs = filepath.Join(r.Root, filepath.FromSlash(p))
+		}
+		if data, err := os.ReadFile(abs); err == nil { //nolint:gosec // G304: a path git reported changed
+			h := store.SHA256Hex(data)
+			ft.SHA256After, ft.SketchAfter = &h, Sketch(data)
+		} else {
+			ft.Deleted = true
+		}
+		if err := r.Store.AddFileTouch(ctx, ft, at); err != nil {
+			return err
+		}
+	}
+	return nil
 }

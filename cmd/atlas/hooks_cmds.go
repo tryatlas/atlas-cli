@@ -94,7 +94,7 @@ func runAgentHook(a hooks.Agent, verb string) func(*cobra.Command, []string) err
 // within the drain's short budget, so a turn reaches the Project without
 // waiting for atlas serve or atlas capture sync. Offline or signed out it
 // does nothing; the rows stay pending for the next drain.
-func syncAfterHook(ctx context.Context, st *store.Store) {
+func syncAfterHook(ctx context.Context, st *store.Store, d hooks.Delivery) {
 	b, err := st.Binding(ctx)
 	if err != nil || b == nil {
 		return
@@ -102,7 +102,11 @@ func syncAfterHook(ctx context.Context, st *store.Store) {
 	if _, ok := capsync.TargetOf(b); !ok || b.DrainState == store.DrainNotAuthorized {
 		return
 	}
-	_, _ = capsync.Drain(ctx, syncClient(), st, capsync.Budget, time.Now)
+	budget := capsync.Budget
+	if d.Tool != nil {
+		budget = time.Second // the agent waits on a post-tool hook: keep it short
+	}
+	_, _ = capsync.Drain(ctx, syncClient(), st, budget, time.Now)
 }
 
 // banner is the SessionStart message: what is on, and which Project.
