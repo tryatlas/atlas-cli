@@ -52,7 +52,7 @@ writes the store itself and syncs, or hands the event to a running
 the folder open. Someone watching the Project sees the prompt, then the tool
 cards one by one, then the reply. Text is not streamed token by token: no
 agent exposes a hook for that. A hook never fails the agent: errors go to
-`.atlas/cli-hooks.log` and `atlas status`.
+`hooks.log` in the CLI state directory (`~/.local/state/atlas-cli/projects/<hash>/`) and `atlas status`. `.atlas/` itself holds only what the desktop app writes.
 
 | agent | hook written to | memory server written to |
 |---|---|---|

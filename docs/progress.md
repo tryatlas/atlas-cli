@@ -1262,3 +1262,24 @@ Reported: agents commit but no checkpoint appears. Two causes, both fixed:
 Verified live: `claude -p` running only `echo … > c4.txt && git add && git
 commit` → checkpoint `["c4.txt"]` linked, the touch consumed by that commit;
 `codex exec` the same → checkpoint `["c5.txt"]` linked.
+
+## v0.3.2: `.atlas/` holds only what the desktop app writes
+
+Reported: the CLI's `.atlas/` differed from the app's. Compared against
+app-made folders on this machine (`Delta`, `acp-ref`, `Portfolio-Clean`):
+the shared files (`.gitignore`, `project.json`, `sessions.db`,
+`sessions.lock`, `memory/memory.sqlite`) were already identical; the CLI also
+wrote its own `hooks/` (session state, spool, OpenCode export cache, locks),
+`cli-hooks.log`, `cli-run.json`, `cli-serve.log` and `cli-import.json`. Those
+now live in a per-user state directory, `$XDG_STATE_HOME/atlas-cli/projects/
+<16 hex of sha256(root)>/` (default `~/.local/state/…`, 0700, with a `root`
+file naming the Project): `hooks/`, `hooks.log`, `run.json` (0600),
+`serve.log`, `import.json`. Older layouts are moved there on first use. The
+app's own UI and index files (`editor-state.json`, `logs.jsonl`,
+`codebase-index/`, `memory/extract-state`, …) are the app's to create when it
+opens the folder. Every test package now points `XDG_STATE_HOME` at a temp
+directory.
+
+Verified: `test-cli` migrated in place (history kept); a fresh Project after
+a hooked Claude turn and an `atlas serve` start/stop has `.atlas/` =
+`.gitignore memory project.json sessions.db sessions.lock`.

@@ -51,7 +51,7 @@ the product.
    Commits are linked by the existing walk (`atlas capture link`), now also
    run from a `post-commit` git hook. No git refs, no commit trailers.
 4. **Hooks never fail the agent.** Every hook exits 0; errors go to
-   `.atlas/cli-hooks.log` and the last one shows in `atlas status`. Stdout
+   `hooks.log` in the CLI state directory and the last one shows in `atlas status`. Stdout
    carries only the agent's own response shape (the SessionStart banner).
    Every hook runs under a deadline. The installed command is wrapped in
    `sh -c 'if ! command -v atlas >/dev/null 2>&1; then exit 0; fi; exec atlas
@@ -59,7 +59,7 @@ the product.
 5. **Delivery.** A hook writes to the store itself when it can take the
    writer lock; when `atlas serve` holds it, the hook posts the turn to the
    listener's owner-only Unix socket; when the desktop app holds it, the turn
-   is spooled under `.atlas/hooks/spool/` and drained by the next writer.
+   is spooled in the CLI state directory (`hooks/spool/`) and drained by the next writer.
 6. **Shared memory reaches native UIs through MCP config.** `atlas agents
    add` also writes the `atlas_memory` server entry into the agent's MCP
    config as a stdio entry `atlas mcp-bridge --project <root> --agent <id>`

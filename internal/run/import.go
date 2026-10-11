@@ -14,6 +14,7 @@ import (
 
 	"github.com/tryatlas/atlas-cli/internal/agents/acp"
 	"github.com/tryatlas/atlas-cli/internal/capture/record"
+	"github.com/tryatlas/atlas-cli/internal/clistate"
 )
 
 // Importing sessions run in an agent's own UI (ADR-0012): each installed
@@ -24,7 +25,7 @@ import (
 
 // ImportStatePath is the CLI's own record of what was imported:
 // {"<agent>": {"<session id>": "<when it was last imported>"}}.
-func ImportStatePath(root string) string { return filepath.Join(root, ".atlas", "cli-import.json") }
+func ImportStatePath(root string) string { return clistate.Path(root, "import.json") }
 
 type importState map[string]map[string]string
 

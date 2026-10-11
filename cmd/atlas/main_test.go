@@ -20,6 +20,8 @@ func TestMain(m *testing.M) {
 	_ = os.Setenv("ATLAS_INGEST_URL", "http://127.0.0.1:1") // unreachable unless a test installs a fake
 	data, _ := os.MkdirTemp("", "atlas-data-")              // never the user's agents
 	_ = os.Setenv("XDG_DATA_HOME", data)
+	state, _ := os.MkdirTemp("", "atlas-state-") // never the user's CLI state
+	_ = os.Setenv("XDG_STATE_HOME", state)
 	os.Exit(m.Run())
 }
 

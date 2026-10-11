@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 	capsync "github.com/tryatlas/atlas-cli/internal/capture/sync"
+	"github.com/tryatlas/atlas-cli/internal/clistate"
 	"github.com/tryatlas/atlas-cli/internal/hooks"
 	"github.com/tryatlas/atlas-cli/internal/hosts"
 	"github.com/tryatlas/atlas-cli/internal/ingest"
@@ -156,7 +156,7 @@ func postSync(ctx context.Context, sock string, retry bool) (listener.SyncAnswer
 const daemonEnv = "ATLAS_SERVE_DAEMON"
 
 // serveLog is where a detached listener's stderr goes.
-func serveLog(root string) string { return filepath.Join(root, store.DirName, "cli-serve.log") }
+func serveLog(root string) string { return clistate.Path(root, "serve.log") }
 
 // runServe runs the listener until interrupted; --daemon detaches it and
 // --stop ends a detached one.

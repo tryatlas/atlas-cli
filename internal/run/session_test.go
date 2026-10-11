@@ -19,6 +19,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	state, _ := os.MkdirTemp("", "atlas-state-") // never the user's CLI state
+	_ = os.Setenv("XDG_STATE_HOME", state)
 	acptest.Main()
 	os.Exit(m.Run())
 }

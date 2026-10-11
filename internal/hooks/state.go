@@ -13,18 +13,19 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	"github.com/tryatlas/atlas-cli/internal/clistate"
 )
 
-// Session state lives under <root>/.atlas/hooks/<agent>/<session id>.json:
-// what the dispatcher needs between two hook invocations of one session.
-// .atlas/ ignores itself in git.
+// Session state lives in the CLI's own state directory (clistate), under
+// hooks/<agent>/<session id>.json: what the dispatcher needs between two hook
+// invocations of one session. Nothing of it goes into <root>/.atlas/, which
+// holds only what the desktop app writes.
 
 // Dir is the hooks state directory of a Project.
-func Dir(root string) string { return filepath.Join(root, store.DirName, "hooks") }
+func Dir(root string) string { return clistate.Path(root, "hooks") }
 
 // LogPath is where hook errors go.
-func LogPath(root string) string { return filepath.Join(root, store.DirName, "cli-hooks.log") }
+func LogPath(root string) string { return clistate.Path(root, "hooks.log") }
 
 // State is one native session as the hooks have seen it.
 type State struct {

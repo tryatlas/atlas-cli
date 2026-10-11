@@ -32,7 +32,8 @@ import (
 // atlas hooks <agent> <verb> is what the installed agent hooks run; atlas
 // hooks git <hook> is what the git hooks run. Both are hidden, read their
 // payload on stdin, never block the agent, and never exit non-zero: an error
-// goes to .atlas/cli-hooks.log and shows in atlas status (ADR-0013 §4).
+// goes to hooks.log in the CLI state directory and shows in atlas status
+// (ADR-0013 §4).
 func newHooksCmd() *cobra.Command {
 	root := &cobra.Command{Use: "hooks", Short: "Entry points for agent and git hooks (installed by atlas agents add)", Hidden: true, Args: cobra.NoArgs}
 	for _, a := range hooks.All() {
