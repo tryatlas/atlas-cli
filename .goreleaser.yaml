@@ -1,0 +1,54 @@
+# Release builds for v1: Linux and macOS, both architectures (D18, ADR-0011; no Windows). Pure Go, CGO_ENABLED=0.
+# Run by .github/workflows/release.yml on a v* tag; `make snapshot` builds
+# the same archives locally without publishing.
+version: 2
+
+project_name: atlas
+
+before:
+  hooks:
+    - go mod tidy -diff
+
+builds:
+  - id: atlas
+    main: ./cmd/atlas
+    binary: atlas
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    targets:
+      - linux_amd64
+      - linux_arm64
+      - darwin_arm64
+      - darwin_amd64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: atlas
+    formats: [tar.gz]
+    name_template: "atlas_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  use: git
+  sort: asc
+
+release:
+  github:
+    owner: tryatlas
+    name: atlas-cli
+  draft: true
+  extra_files:
+    - glob: ./install.sh
