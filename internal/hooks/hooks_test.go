@@ -536,3 +536,48 @@ func TestShellChangesLandOnTheShellCall(t *testing.T) {
 		t.Fatalf("touches = %d, want 1", n)
 	}
 }
+
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	c := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=T", "-c", "user.email=t@e", "-c", "commit.gpgsign=false"}, args...)...)
+	c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null")
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+}
+
+func TestACommitMadeDuringTheTurnGetsItsCheckpoint(t *testing.T) {
+	for _, perEvent := range []bool{true, false} {
+		root := gitRepo(t)
+		st := enabledStore(t, root)
+		transcript := filepath.Join(t.TempDir(), "s.jsonl")
+		_ = os.WriteFile(transcript, nil, 0o600)
+		d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test", nil)}
+		sess := map[string]any{"Session": "s-c", "Transcript": transcript}
+		runHook(t, d, "start", sess)
+		runHook(t, d, "prompt", map[string]any{"Session": "s-c", "Transcript": transcript, "Prompt": "write and commit"})
+		// One shell command writes the file and commits it; the
+		// post-commit hook would run here and find no touch yet.
+		_ = os.WriteFile(filepath.Join(root, "c2.txt"), []byte("two\n"), 0o644)
+		gitIn(t, root, "add", "c2.txt")
+		gitIn(t, root, "commit", "-q", "-m", "agent commit")
+		if perEvent {
+			args, _ := json.Marshal(map[string]string{"command": "echo two > c2.txt && git add c2.txt && git commit -m 'agent commit'"})
+			runHook(t, d, "tool", map[string]any{"Session": "s-c", "Transcript": transcript,
+				"Tool": &record.Tool{NativeID: "sh", Name: "Bash", Arguments: args, Status: "completed"}})
+		}
+		f, _ := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+		_, _ = f.WriteString(`{"kind":"text","body":"Committed."}` + "\n")
+		_ = f.Close()
+		runHook(t, d, "stop", sess)
+		var files string
+		if err := st.DB().QueryRow(`SELECT files_touched FROM checkpoint`).Scan(&files); err != nil || !strings.Contains(files, "c2.txt") {
+			t.Fatalf("perEvent=%v: checkpoint files = %q %v", perEvent, files, err)
+		}
+		var live int
+		_ = st.DB().QueryRow(`SELECT count(*) FROM file_touch WHERE path = 'c2.txt' AND consumed_by_commit IS NULL`).Scan(&live)
+		if live != 0 {
+			t.Fatalf("perEvent=%v: the late touch must be consumed by the commit it linked to", perEvent)
+		}
+	}
+}

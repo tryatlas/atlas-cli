@@ -16,6 +16,7 @@ import (
 	"sort"
 	"time"
 
+	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
 	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 	"github.com/tryatlas/atlas-cli/internal/listener"
@@ -61,6 +62,22 @@ func Deliver(version string, afterDirect func(ctx context.Context, st *store.Sto
 // listener and the direct path share it.
 func Apply(ctx context.Context, rec *record.Recorder, mem *server.Server, ds []Delivery) error {
 	for _, d := range ds {
+		if err := apply1(ctx, rec, mem, d); err != nil {
+			return err
+		}
+		if d.LinkFrom != "" {
+			// Touches that landed after a commit the post-commit hook
+			// already walked: link the turn's commits now.
+			if _, err := gitlink.LinkRange(ctx, rec.Store, d.Root, d.LinkFrom, time.Now); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func apply1(ctx context.Context, rec *record.Recorder, mem *server.Server, d Delivery) error {
+	{
 		g := server.Grant{SessionID: d.Session.NativeID, Agent: d.Session.Agent, Cwd: d.Root}
 		switch {
 		case d.Start:

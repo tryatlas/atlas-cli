@@ -42,6 +42,12 @@ type State struct {
 	Offset int `json:"offset"`
 	// Prompt is the typed prompt of the open turn.
 	Prompt string `json:"prompt,omitempty"`
+	// Head is HEAD at the baseline (turn start, then each shell call):
+	// commits after it were made during the turn.
+	Head string `json:"head,omitempty"`
+	// TurnHead is HEAD when the turn started: commits after it are linked
+	// once the turn's touches have landed.
+	TurnHead string `json:"turn_head,omitempty"`
 	// Status is git status at turn start: path → true; nil when no snapshot
 	// was taken (an empty map is a clean tree, so no omitempty).
 	Status map[string]bool `json:"status"`

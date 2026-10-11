@@ -43,6 +43,9 @@ type Delivery struct {
 	Changed []string `json:"changed,omitempty"`
 	// At is when the hook fired, so a spooled delivery keeps its time.
 	At time.Time `json:"at,omitempty"`
+	// LinkFrom, when set, asks the writer to link the commits after it to
+	// the touches just recorded (commits made during the turn).
+	LinkFrom string `json:"link_from,omitempty"`
 }
 
 // OpenTurn is the prompt that opens a turn as it is submitted.
@@ -115,6 +118,8 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 		st.Prompt = ev.Prompt
 		st.ToolFiles, st.Delivered, st.Tools, st.Open = nil, nil, nil, false
 		st.Status = gitStatus(ctx, d.Root)
+		st.Head = gitHead(ctx, d.Root)
+		st.TurnHead = st.Head
 		if r := a.Reader(); r != nil && st.Transcript != "" {
 			if pos, err := r.Position(st.Transcript); err == nil {
 				st.Offset = pos
@@ -150,16 +155,30 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 				// What the shell command changed is known now: its touches,
 				// and the baseline for the rest of the turn moves past them.
 				after := gitStatus(ctx, d.Root)
+				head := gitHead(ctx, d.Root)
 				explained := explainedPaths(st.Delivered)
-				for _, p := range changedSince(d.Root, st.Status, after) {
+				changed := changedSince(d.Root, st.Status, after)
+				if head != "" && head != st.Head {
+					// The command committed: what it committed is no longer
+					// in git status but is its work all the same.
+					changed = append(changed, committedSince(ctx, d.Root, st.Head)...)
+				}
+				for _, p := range changed {
 					if !explained[p] {
 						dl.Changed = append(dl.Changed, p)
 						st.Delivered = append(st.Delivered, []string{"path:" + p})
+						explained[p] = true
 					}
 				}
 				if after != nil {
 					st.Status = after
 				}
+				if head != "" {
+					st.Head = head
+				}
+			}
+			if st.TurnHead != "" && gitHead(ctx, d.Root) != st.TurnHead {
+				dl.LinkFrom = st.TurnHead
 			}
 			if err := st.Save(d.Root); err != nil {
 				return nil, err
@@ -180,11 +199,16 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 			return nil, st.Save(d.Root)
 		}
 		st.Turn++
+		linkFrom := ""
+		if st.TurnHead != "" && gitHead(ctx, d.Root) != st.TurnHead {
+			linkFrom = st.TurnHead // commits made during the turn
+		}
+		st.Head, st.TurnHead = "", ""
 		if err := st.Save(d.Root); err != nil {
 			return nil, err
 		}
 		sess.Model = st.Model
-		return nil, d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, Turn: turn, At: now})
+		return nil, d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, Turn: turn, At: now, LinkFrom: linkFrom})
 
 	case Compaction:
 		return nil, st.Save(d.Root)
@@ -278,9 +302,14 @@ func (d *Dispatcher) turnEnd(ctx context.Context, a Agent, st *State, ev *Event)
 		}
 	}
 	if st.Status != nil {
-		for _, p := range changedSince(d.Root, st.Status, gitStatus(ctx, d.Root)) {
+		changed := changedSince(d.Root, st.Status, gitStatus(ctx, d.Root))
+		if head := gitHead(ctx, d.Root); head != "" && st.Head != "" && head != st.Head {
+			changed = append(changed, committedSince(ctx, d.Root, st.Head)...)
+		}
+		for _, p := range changed {
 			if !explained[p] {
 				turn.Changed = append(turn.Changed, p)
+				explained[p] = true
 			}
 		}
 	}

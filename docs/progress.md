@@ -1243,3 +1243,22 @@ known only at Stop.
 
 Per-event capture for all eight agents (above), the per-session lock, the
 dedupe by key groups, shell changes on the shell call, hook times kept.
+
+## v0.3.1: commits made by an agent get their checkpoint
+
+Reported: agents commit but no checkpoint appears. Two causes, both fixed:
+
+- A file written and committed by one shell command never shows in `git
+  status`, so the turn had no touch for it. The dispatcher now remembers
+  HEAD at turn start (and after each shell call); files changed by commits
+  made during the turn count as the turn's changes, on the shell call that
+  committed them.
+- The post-commit hook links only touches that already exist; touches that
+  land later (at Stop, or a shell call's) missed the commit, and the cursor
+  had moved past it. A delivery now carries the turn's starting HEAD, and the
+  writer links the commits made since then (`gitlink.LinkRange`), consuming
+  the late touches so they cannot attach to a later commit.
+
+Verified live: `claude -p` running only `echo … > c4.txt && git add && git
+commit` → checkpoint `["c4.txt"]` linked, the touch consumed by that commit;
+`codex exec` the same → checkpoint `["c5.txt"]` linked.
