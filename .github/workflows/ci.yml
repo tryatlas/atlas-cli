@@ -18,17 +18,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Native runners, so tests run on each target, not just compile (D18: no Windows).
+          # Native runners, so tests run on each target, not just compile (D18 and ADR-0011: no Windows).
           - target: linux/amd64
             runner: ubuntu-24.04
           - target: linux/arm64
             runner: ubuntu-24.04-arm
           - target: darwin/arm64
             runner: macos-15
+          - target: darwin/amd64
+            runner: macos-15-intel
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: true
@@ -38,7 +40,7 @@ jobs:
         run: make build
       - name: Test
         run: go test -timeout 5m ./...
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: atlas-${{ matrix.runner }}
           path: bin/atlas
@@ -47,12 +49,12 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: true
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
       - name: go.mod is tidy

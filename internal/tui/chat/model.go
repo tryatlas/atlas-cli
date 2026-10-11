@@ -2,11 +2,8 @@ package chat
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -665,7 +662,7 @@ func (m *Model) openAttach() {
 		if !ok || path == "" {
 			return nil, ""
 		}
-		block, err := imageBlock(path)
+		block, err := acp.ImageBlock(path)
 		if err != nil {
 			return nil, err.Error()
 		}
@@ -673,29 +670,6 @@ func (m *Model) openAttach() {
 		m.imgNames = append(m.imgNames, filepath.Base(path))
 		return nil, ""
 	}}
-}
-
-var imageTypes = map[string]string{".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
-
-// imageBlock reads an image file into an ACP image block.
-func imageBlock(path string) (acp.ContentBlock, error) {
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, path[2:])
-		}
-	}
-	mime, ok := imageTypes[strings.ToLower(filepath.Ext(path))]
-	if !ok {
-		return acp.ContentBlock{}, errors.New("not a png, jpeg, gif or webp file")
-	}
-	b, err := os.ReadFile(path) //nolint:gosec // G304: a file the user chose
-	if err != nil {
-		return acp.ContentBlock{}, err
-	}
-	if len(b) > 20<<20 {
-		return acp.ContentBlock{}, errors.New("larger than 20 MiB")
-	}
-	return acp.ContentBlock{Type: "image", Data: base64.StdEncoding.EncodeToString(b), MimeType: mime}, nil
 }
 
 // ── sessions and restart ─────────────────────────────────────────────────────

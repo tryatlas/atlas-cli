@@ -1,13 +1,14 @@
 # Releasing the Atlas CLI
 
-v1 ships for **linux/amd64, linux/arm64 and darwin/arm64** (D18: no
-Windows). It is pure Go (`CGO_ENABLED=0`), so every target cross-compiles
-from one machine. Intel Macs build from source (`make build`).
+v1 ships for **linux/amd64, linux/arm64, darwin/arm64 and darwin/amd64**
+(D18 and ADR-0011: no Windows). It is pure Go (`CGO_ENABLED=0`), so every
+target cross-compiles from one machine, and CI tests each on a native
+runner.
 
 ## What a release is
 
-- A `v*` tag on `main`. `.github/workflows/release.yml` runs the tests,
-  then GoReleaser (`.goreleaser.yaml`) builds the three archives
+- A `v*` tag. `.github/workflows/release.yml` runs the tests, then
+  GoReleaser (`.goreleaser.yaml`) builds the four archives
   `atlas_<version>_<os>_<arch>.tar.gz` (binary plus README),
   `checksums.txt` (sha256) and `install.sh`, and opens a **draft** GitHub
   release with them.
@@ -35,9 +36,9 @@ curl -fsSL https://github.com/tryatlas/atlas-cli/releases/latest/download/instal
    ```
 3. Run the acceptance checklists below on a real machine.
 4. Tag and push: `git tag -a v1.0.0 -m "Atlas CLI 1.0.0" && git push origin v1.0.0`.
-5. When the release workflow is green, review the draft release (three
+5. When the release workflow is green, review the draft release (four
    archives, `checksums.txt`, `install.sh`), then publish it.
-6. On a clean Linux and a clean Apple-silicon Mac:
+6. On a clean Linux machine and on a Mac (Apple silicon or Intel):
    `curl -fsSL …/install.sh | sh`, then `atlas --version`.
 
 ## Acceptance checklists

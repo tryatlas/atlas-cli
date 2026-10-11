@@ -31,6 +31,7 @@ func newRunCmd() *cobra.Command {
 	c.Flags().Bool("no-tui", false, "no chat screen: run one --prompt and print to the terminal")
 	c.Flags().Bool("yes", false, "allow every permission the agent asks for (headless)")
 	c.Flags().String("resume", "", "continue an earlier ACP session id (session/load or session/resume)")
+	c.Flags().StringArray("image", nil, "attach an image to the --prompt (png, jpeg, gif, webp; repeatable)")
 	return c
 }
 
@@ -125,10 +126,19 @@ func runRun(cmd *cobra.Command, args []string) error {
 			stop()
 		}
 	}()
+	images, err := imageBlocks(cmd)
+	if err != nil {
+		finish()
+		return err
+	}
+	if len(images) > 0 && !ag.Init.AgentCapabilities.PromptCapabilities.Image {
+		finish()
+		return fmt.Errorf("%s does not accept images", ag.Name())
+	}
 	view.mu.Lock()
 	view.live = true
 	view.mu.Unlock()
-	r, err := sess.Prompt(pctx, prompt, nil, nil)
+	r, err := sess.Prompt(pctx, prompt, images, nil)
 	view.endLine()
 	if err != nil {
 		if errors.Is(err, acp.ErrClosed) {
@@ -341,6 +351,16 @@ func runChat(cmd *cobra.Command, id, first string) error {
 	}
 	prog := tea.NewProgram(m, tea.WithContext(ctx))
 	bridge.Attach(prog)
+	// A terminal closing or a kill still ends the session cleanly: memory's
+	// session_end, the commit link and the last sync pass.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sig)
+	go func() {
+		if _, ok := <-sig; ok {
+			prog.Quit()
+		}
+	}()
 	_, runErr := prog.Run()
 	c.Close(context.Background())
 	res, err := h.Close()
@@ -367,4 +387,18 @@ func chooseAuth(ms []acp.AuthMethod) (acp.AuthMethod, bool) {
 		return acp.AuthMethod{}, false
 	}
 	return ms[i], true
+}
+
+// imageBlocks reads the --image files.
+func imageBlocks(cmd *cobra.Command) ([]acp.ContentBlock, error) {
+	paths, _ := cmd.Flags().GetStringArray("image")
+	var out []acp.ContentBlock
+	for _, p := range paths {
+		b, err := acp.ImageBlock(p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, nil
 }

@@ -3,6 +3,10 @@
 #
 #   curl -fsSL https://github.com/tryatlas/atlas-cli/releases/latest/download/install.sh | sh
 #
+# While the repository is private, anonymous downloads fail: the script then
+# uses the GitHub CLI (`gh`, signed in with access to the repository), which
+# handles the authentication. It never reads or prints a token.
+#
 # Environment:
 #   ATLAS_VERSION      a tag such as v1.0.0 (default: the latest release)
 #   ATLAS_INSTALL_DIR  where the binary goes (default: ~/.local/bin)
@@ -24,9 +28,6 @@ case "$(uname -m)" in
   arm64 | aarch64) arch=arm64 ;;
   *) fail "unsupported CPU $(uname -m)" ;;
 esac
-if [ "$os/$arch" = "darwin/amd64" ]; then
-  fail "no release build for Intel Macs; build from source: make build"
-fi
 
 if command -v curl >/dev/null 2>&1; then
   fetch() { curl -fsSL "$1" -o "$2"; }
@@ -47,19 +48,35 @@ fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+# use_gh: the GitHub CLI is signed in and can see the repository (needed
+# while it is private). ATLAS_BASE_URL always means a plain download.
+use_gh=no
+if [ -z "${ATLAS_BASE_URL:-}" ] && command -v gh >/dev/null 2>&1 && gh release list -R "$repo" --limit 1 >/dev/null 2>&1; then
+  use_gh=yes
+fi
+
 version="${ATLAS_VERSION:-}"
 if [ -z "$version" ]; then
-  fetch "https://api.github.com/repos/$repo/releases/latest" "$tmp/latest.json" || fail "could not find the latest release"
-  version="$(sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' "$tmp/latest.json" | head -n1)"
-  [ -n "$version" ] || fail "could not read the latest release tag"
+  if [ "$use_gh" = yes ]; then
+    version="$(gh release view -R "$repo" --json tagName --jq .tagName 2>/dev/null || true)"
+  else
+    fetch "https://api.github.com/repos/$repo/releases/latest" "$tmp/latest.json" 2>/dev/null &&
+      version="$(sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' "$tmp/latest.json" | head -n1)"
+  fi
+  [ -n "$version" ] || fail "could not find the latest release (a private repository needs the GitHub CLI: gh auth login)"
 fi
 plain="${version#v}"
-base="${ATLAS_BASE_URL:-https://github.com/$repo/releases/download/$version}"
 archive="atlas_${plain}_${os}_${arch}.tar.gz"
 
 echo "Downloading atlas $version for $os/$arch…"
-fetch "$base/$archive" "$tmp/$archive" || fail "download failed: $base/$archive"
-fetch "$base/checksums.txt" "$tmp/checksums.txt" || fail "download failed: $base/checksums.txt"
+if [ "$use_gh" = yes ]; then
+  gh release download "$version" -R "$repo" -D "$tmp" -p "$archive" -p checksums.txt ||
+    fail "download failed: $archive from $repo $version"
+else
+  base="${ATLAS_BASE_URL:-https://github.com/$repo/releases/download/$version}"
+  fetch "$base/$archive" "$tmp/$archive" || fail "download failed: $base/$archive (a private repository needs the GitHub CLI: gh auth login)"
+  fetch "$base/checksums.txt" "$tmp/checksums.txt" || fail "download failed: $base/checksums.txt"
+fi
 
 want="$(grep " $archive\$" "$tmp/checksums.txt" | cut -d' ' -f1)"
 [ -n "$want" ] || fail "$archive is not in checksums.txt"

@@ -936,3 +936,55 @@ open, as on the desktop.
     included.
   - Binary install directories were `0700` (the staging dir from
     `MkdirTemp`); now `0755`.
+- **CI green on the remote**: commit `91fbc7c` pushed to
+  `origin/feat/cli-foundation`; run 38131955335 passed lint and the tests on
+  linux/amd64, linux/arm64 and darwin/arm64 (native runners). Annotation
+  only: actions/checkout@v4, setup-go@v5, upload-artifact@v4 and
+  golangci-lint-action@v8 target Node.js 20, which GitHub now forces onto
+  Node 24. Bump them when newer majors exist.
+
+Not done: no `v*` tag has been pushed, so the release workflow and the
+published archives are untested on GitHub (verified locally with
+`make snapshot`). The desktop checklist (`docs/acceptance/acp.md`) still
+has no results.
+
+## Release preparation (macOS and Linux)
+
+- **ADR-0011**: v1 also ships for Intel Macs (darwin/amd64), the machine
+  everything was verified on. GoReleaser builds four archives. CI tests
+  darwin/amd64 natively on `macos-15-intel` alongside linux/amd64,
+  linux/arm64 and darwin/arm64. `install.sh` installs on all four.
+- CI and release actions moved to their Node 24 majors (checkout@v7,
+  setup-go@v7, upload-artifact@v7, golangci-lint-action@v9,
+  goreleaser-action@v7), which clears the Node 20 deprecation.
+- **`install.sh` and the private repository**: anonymous release downloads
+  fail while `tryatlas/atlas-cli` is private. The script now uses the
+  GitHub CLI (`gh release view/download`, which handles auth) when it is
+  signed in with access, and plain downloads otherwise. It never reads a
+  token. The darwin/amd64 snapshot installed and ran natively here.
+- **`atlas run --image <file>`** (repeatable, png/jpeg/gif/webp, ≤20 MiB,
+  refused when the agent does not advertise images). The reader is shared
+  with the chat screen. Verified live: `claude-acp` named the colour of an
+  attached 64×64 PNG ("Red").
+- **Restart after a crash**, verified live in the chat screen. Turn 1
+  answered; `kill -9` of the agent's process group showed the disconnect
+  with its stderr tail; ctrl+r relaunched it and reloaded the same session;
+  turn 2 was recorded on that session; a clean exit followed. Also a
+  deterministic test: the real `Chat` driver plus the fake agent, kill,
+  `Restart`, `Prompt`, both turns on one session.
+- **SIGTERM/SIGHUP** quit the chat screen cleanly. Verified live:
+  `session_end` written, run file removed, no process left.
+- **Stale run file**: a `cli-run.json` whose pid is dead (a SIGKILL or
+  SIGQUIT) is ignored.
+- **README**: the examples named `atlas run codex` and `atlas run
+  claude-code`, which are not registry ids (`codex-acp`, `claude-acp`) and
+  would fail. Fixed, with install and command sections added.
+
+Still open, needing the user:
+
+- the desktop checklist (`docs/acceptance/acp.md`);
+- a license (there is no LICENSE file);
+- whether the repository goes public (then `curl … | sh` works without
+  `gh`);
+- elicitation has not been seen from a real agent (none of the 38 sent
+  one), so only the fixtures cover it.

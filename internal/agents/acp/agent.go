@@ -137,6 +137,9 @@ func (a *Agent) Name() string {
 	return a.ID
 }
 
+// PID is the agent's process id.
+func (a *Agent) PID() int { return a.proc.PID() }
+
 // Done closes when the agent's output ends.
 func (a *Agent) Done() <-chan struct{} { return a.conn.Done() }
 

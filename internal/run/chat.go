@@ -25,6 +25,8 @@ type Chat struct {
 	mu   sync.Mutex
 	sess *Session
 	inst *acp.Installed
+
+	launchFn func(context.Context, *Session) (*acp.Agent, *acp.Installed, error) // tests
 }
 
 var _ chat.Driver = (*Chat)(nil)
@@ -54,7 +56,13 @@ func (c *Chat) Start(ctx context.Context, resume string) error {
 func (c *Chat) launch(ctx context.Context) (*Session, error) {
 	s := NewSession(c.AgentID, c.Cwd, c.Host, c.View)
 	s.ChooseAuth = c.ChooseAuth
-	ag, inst, err := c.Agents.Launch(ctx, c.AgentID, c.Cwd, s)
+	launch := c.launchFn
+	if launch == nil {
+		launch = func(ctx context.Context, s *Session) (*acp.Agent, *acp.Installed, error) {
+			return c.Agents.Launch(ctx, c.AgentID, c.Cwd, s)
+		}
+	}
+	ag, inst, err := launch(ctx, s)
 	if err != nil {
 		return nil, err
 	}

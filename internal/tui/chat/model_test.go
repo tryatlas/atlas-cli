@@ -286,7 +286,7 @@ func TestCancelDisconnectAndImages(t *testing.T) {
 	if m.state != stateIdle {
 		t.Fatal("restart")
 	}
-	if _, err := imageBlock("/no/such.txt"); err == nil {
+	if _, err := acp.ImageBlock("/no/such.txt"); err == nil {
 		t.Fatal("non-image accepted")
 	}
 	f.info.Caps.PromptCapabilities.Image = false

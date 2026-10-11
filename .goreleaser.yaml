@@ -1,4 +1,4 @@
-# Release builds for v1 (D18: no Windows). Pure Go, CGO_ENABLED=0.
+# Release builds for v1: Linux and macOS, both architectures (D18, ADR-0011; no Windows). Pure Go, CGO_ENABLED=0.
 # Run by .github/workflows/release.yml on a v* tag; `make snapshot` builds
 # the same archives locally without publishing.
 version: 2
@@ -23,6 +23,7 @@ builds:
       - linux_amd64
       - linux_arm64
       - darwin_arm64
+      - darwin_amd64
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:

@@ -201,6 +201,14 @@ func Spawn(c Command, dir string) (*Process, error) {
 	return p, nil
 }
 
+// PID is the agent's process id (its process group).
+func (p *Process) PID() int {
+	if p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
+}
+
 // Exited closes when the process ends.
 func (p *Process) Exited() <-chan struct{} { return p.exited }
 

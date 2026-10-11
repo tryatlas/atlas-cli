@@ -104,3 +104,13 @@ func TestSyncControlOverTheSocket(t *testing.T) {
 		t.Fatalf("socket serves only /sync: %d", resp.StatusCode)
 	}
 }
+
+func TestStaleRunFileIsIgnored(t *testing.T) {
+	root := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(root, ".atlas"), 0o755)
+	// A pid that cannot be running.
+	_ = os.WriteFile(RunFilePath(root), []byte(`{"pid":999999,"port":1,"socket":"/tmp/x.sock"}`), 0o644)
+	if ReadRunFile(root) != nil {
+		t.Fatal("a dead listener's run file was trusted")
+	}
+}

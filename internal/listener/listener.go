@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/tryatlas/atlas-cli/internal/memory/server"
@@ -42,6 +43,9 @@ func ReadRunFile(root string) *RunFile {
 	var rf RunFile
 	if json.Unmarshal(b, &rf) != nil || rf.Socket == "" {
 		return nil
+	}
+	if rf.PID > 0 && syscall.Kill(rf.PID, 0) != nil {
+		return nil // the listener died without cleaning up
 	}
 	return &rf
 }
