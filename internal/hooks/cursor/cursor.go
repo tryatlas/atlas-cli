@@ -3,12 +3,15 @@
 // under ~/.cursor/projects (docs/research/entire-cli.md §3).
 //
 // Observed live against cursor-agent 2026.10.01: the interactive TUI fires
-// sessionStart (at the first prompt, not at launch), beforeSubmitPrompt,
-// stop and sessionEnd, so turns are captured as they end. Print mode
-// (cursor-agent -p) fires only sessionStart, the tool hooks and sessionEnd:
-// no beforeSubmitPrompt and no stop, so a -p run yields a session with no
-// turns. The TUI keeps a hook's stdin open; ReadPayload returns after one
-// JSON value, so Atlas never blocks it.
+// sessionStart (at the first prompt, not at launch), beforeSubmitPrompt, the
+// tool hooks afterFileEdit and afterShellExecution as each call completes,
+// stop and sessionEnd. The prompt opens the turn, each tool hook records its
+// call into the open turn, and stop closes it with the transcript's text.
+// Print mode (cursor-agent -p) fires only sessionStart, the tool hooks and
+// sessionEnd: no beforeSubmitPrompt and no stop, so a -p run yields a
+// session with no turns until sessionEnd captures the whole transcript as
+// one. The TUI keeps a hook's stdin open; ReadPayload returns after one JSON
+// value, so Atlas never blocks it.
 package cursor
 
 import (
@@ -23,6 +26,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 	"github.com/tryatlas/atlas-cli/internal/hooks"
 )
@@ -37,11 +41,13 @@ type Agent struct{}
 
 // Hook verbs, as the installed commands name them.
 const (
-	VerbSessionStart = "session-start"
-	VerbBeforePrompt = "before-submit-prompt"
-	VerbStop         = "stop"
-	VerbSessionEnd   = "session-end"
-	VerbPreCompact   = "pre-compact"
+	VerbSessionStart  = "session-start"
+	VerbBeforePrompt  = "before-submit-prompt"
+	VerbAfterFileEdit = "after-file-edit"
+	VerbAfterShell    = "after-shell-execution"
+	VerbStop          = "stop"
+	VerbSessionEnd    = "session-end"
+	VerbPreCompact    = "pre-compact"
 )
 
 // hook is one Cursor hook event and the verb Atlas runs for it.
@@ -51,10 +57,15 @@ type hook struct {
 }
 
 // installed are the hooks Atlas writes, in lifecycle order. Cursor hooks
-// take no matcher; the stdin payload is the same shape for every event.
+// take no matcher; the stdin payload shares its common fields across events.
+// Cursor has no generic post-tool hook: afterFileEdit and afterShellExecution
+// are the two that name a completed call (afterMCPExecution is left to the
+// transcript).
 var installed = []hook{
 	{"sessionStart", VerbSessionStart},
 	{"beforeSubmitPrompt", VerbBeforePrompt},
+	{"afterFileEdit", VerbAfterFileEdit},
+	{"afterShellExecution", VerbAfterShell},
 	{"stop", VerbStop},
 	{"sessionEnd", VerbSessionEnd},
 	{"preCompact", VerbPreCompact},
@@ -294,6 +305,7 @@ func (Agent) ResumeCommand(id string) string { return "cursor-agent --resume " +
 // the first tool hook on; the IDE names it throughout.
 type payload struct {
 	ConversationID string   `json:"conversation_id"`
+	GenerationID   string   `json:"generation_id"` // changes with each user message
 	Model          string   `json:"model"`
 	WorkspaceRoots []string `json:"workspace_roots"`
 	TranscriptPath string   `json:"transcript_path"`
@@ -306,6 +318,72 @@ type payload struct {
 	OutputTokens     *json.Number `json:"output_tokens"`
 	CacheReadTokens  *json.Number `json:"cache_read_tokens"`
 	CacheWriteTokens *json.Number `json:"cache_write_tokens"`
+	// afterFileEdit: the absolute path and the replacements applied to it. A
+	// new file arrives as one edit with an empty old_string.
+	FilePath string `json:"file_path"`
+	Edits    []edit `json:"edits"`
+	// afterShellExecution: the command and, when Cursor captured it, its
+	// output.
+	Command string  `json:"command"`
+	Output  *string `json:"output"`
+}
+
+// edit is one replacement of an afterFileEdit payload.
+type edit struct {
+	OldString string `json:"old_string"`
+	NewString string `json:"new_string"`
+}
+
+// nativeID names a hook-reported call: Cursor's tool hooks carry no call id
+// (and its transcript gives tool_use blocks none either), so the id is the
+// generation plus a hash of what the call did. The dispatcher matches the
+// transcript's copy by written path or command text, not by this id.
+func (p payload) nativeID(kind string, parts ...string) string {
+	h := store.SHA256Hex([]byte(strings.Join(parts, "\x00")))[:16]
+	if p.GenerationID == "" {
+		return kind + "-" + h
+	}
+	return p.GenerationID + "-" + kind + "-" + h
+}
+
+// editTool is the completed call an afterFileEdit payload describes, in the
+// shape Cursor's transcript gives the same call so the dispatcher's keys
+// line up: a new file is Write {path, contents}; anything else is Edit
+// {path, edits} with the single replacement also flattened to old_string and
+// new_string so the recorder can synthesise its patch.
+func (p payload) editTool() *record.Tool {
+	if p.FilePath == "" {
+		return nil
+	}
+	edits, _ := json.Marshal(p.Edits)
+	t := &record.Tool{NativeID: p.nativeID("edit", p.FilePath, string(edits)), Status: "completed"}
+	if len(p.Edits) == 1 && p.Edits[0].OldString == "" {
+		t.Name = "Write"
+		t.Arguments = hooks.Raw(map[string]any{"path": p.FilePath, "contents": p.Edits[0].NewString})
+		return t
+	}
+	t.Name = "Edit"
+	args := map[string]any{"path": p.FilePath, "edits": p.Edits}
+	if len(p.Edits) == 1 {
+		args["old_string"], args["new_string"] = p.Edits[0].OldString, p.Edits[0].NewString
+	}
+	t.Arguments = hooks.Raw(args)
+	return t
+}
+
+// shellTool is the completed call an afterShellExecution payload describes:
+// Shell {command}, as the transcript names it, with the output as its result.
+func (p payload) shellTool() *record.Tool {
+	if strings.TrimSpace(p.Command) == "" {
+		return nil
+	}
+	out := ""
+	if p.Output != nil {
+		out = *p.Output
+	}
+	t := &record.Tool{NativeID: p.nativeID("shell", p.Command, out), Name: "Shell", Status: "completed",
+		Arguments: hooks.Raw(map[string]string{"command": p.Command}), Result: p.Output}
+	return t
 }
 
 func (p payload) cwd() string {
@@ -373,6 +451,16 @@ func (Agent) Parse(verb string, raw []byte) (*hooks.Event, error) {
 	case VerbBeforePrompt:
 		ev.Kind = hooks.TurnStart
 		ev.Prompt = p.Prompt
+	case VerbAfterFileEdit:
+		ev.Kind = hooks.ToolUse
+		if ev.Tool = p.editTool(); ev.Tool == nil {
+			return nil, nil
+		}
+	case VerbAfterShell:
+		ev.Kind = hooks.ToolUse
+		if ev.Tool = p.shellTool(); ev.Tool == nil {
+			return nil, nil
+		}
 	case VerbStop:
 		ev.Kind = hooks.TurnEnd
 		ev.Usage = p.usage()

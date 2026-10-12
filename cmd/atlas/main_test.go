@@ -20,6 +20,9 @@ func TestMain(m *testing.M) {
 	_ = os.Setenv("ATLAS_INGEST_URL", "http://127.0.0.1:1") // unreachable unless a test installs a fake
 	data, _ := os.MkdirTemp("", "atlas-data-")              // never the user's agents
 	_ = os.Setenv("XDG_DATA_HOME", data)
+	state, _ := os.MkdirTemp("", "atlas-state-") // never the user's CLI state
+	_ = os.Setenv("XDG_STATE_HOME", state)
+	_ = os.Setenv("ATLAS_MODELS_DIR", state) // no embedding model: deterministic
 	os.Exit(m.Run())
 }
 
@@ -44,6 +47,7 @@ var wantCommands = []string{
 	"capture link",
 	"capture retry",
 	"capture sync",
+	"hooks extract",
 	"hooks git post-commit",
 	"init",
 	"login",
@@ -54,13 +58,17 @@ var wantCommands = []string{
 	"memory enable",
 	"memory export",
 	"memory import",
+	"memory index",
 	"memory list",
 	"memory verify",
 	"org create",
 	"org list",
 	"org use",
 	"serve",
+	"settings",
 	"status",
+	"sync",
+	"update",
 	"whoami",
 }
 
@@ -104,8 +112,9 @@ var implemented = map[string]bool{
 	"memory verify": true, "memory export": true, "memory import": true, "mcp-bridge": true, "serve": true,
 	"capture link": true, "capture sync": true, "acp import": true, "capture retry": true, "acp run": true, "memory browse": true, "memory list": true,
 	"acp check": true, "acp detect": true, "acp install": true, "acp list": true, "acp sessions": true, "acp logout": true, "acp uninstall": true,
+	"settings": true, "sync": true, "update": true, "memory index": true,
 	"agents add": true, "agents list": true, "agents remove": true, "agents sessions": true,
-	"hooks git post-commit": true,
+	"hooks extract": true, "hooks git post-commit": true,
 }
 
 func TestStubsReportNotImplemented(t *testing.T) {

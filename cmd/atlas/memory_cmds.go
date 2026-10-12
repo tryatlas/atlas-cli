@@ -14,6 +14,7 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/memory/record"
 	"github.com/tryatlas/atlas-cli/internal/memory/server"
 	"github.com/tryatlas/atlas-cli/internal/project"
+	"github.com/tryatlas/atlas-cli/internal/tui"
 	"github.com/tryatlas/atlas-cli/internal/tui/memview"
 )
 
@@ -37,15 +38,16 @@ func runMemoryVerify(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer st.Close()
-	rep, err := st.VerifyChain()
-	if err != nil {
-		return err
-	}
-	if !rep.OK() {
-		return fmt.Errorf("the revision chain is broken at revision %d (%d revisions checked): history was edited outside Atlas", rep.FirstBad, rep.Revisions)
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Revision chain intact: %d revisions in %s\n", rep.Revisions, record.Path(st.ScopeRoot))
-	return nil
+	return tui.Work(cmd.OutOrStdout(), "Verifying the memory revision chain", func(tui.StepFunc) (string, error) {
+		rep, err := st.VerifyChain()
+		if err != nil {
+			return "", err
+		}
+		if !rep.OK() {
+			return "", fmt.Errorf("the revision chain is broken at revision %d (%d revisions checked): history was edited outside Atlas", rep.FirstBad, rep.Revisions)
+		}
+		return fmt.Sprintf("Revision chain intact: %d revisions in %s", rep.Revisions, record.Path(st.ScopeRoot)), nil
+	})
 }
 
 func runMemoryExport(cmd *cobra.Command, args []string) error {
@@ -54,12 +56,13 @@ func runMemoryExport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer st.Close()
-	n, err := st.Export(cmd.Context(), args[0])
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Exported %d memories to %s (MEMORY.md, decisions.md, architecture.md, facts.md, failures.md).\n", n, args[0])
-	return nil
+	return tui.Work(cmd.OutOrStdout(), "Exporting shared memory", func(tui.StepFunc) (string, error) {
+		n, err := st.Export(cmd.Context(), args[0])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Exported %d memories to %s (MEMORY.md, decisions.md, architecture.md, facts.md, failures.md).", n, args[0]), nil
+	})
 }
 
 func runMemoryImport(cmd *cobra.Command, args []string) error {
@@ -75,12 +78,13 @@ func runMemoryImport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer st.Close()
-	res, err := st.Import(cmd.Context(), args[0], now().UnixMilli())
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Imported %d memories as candidates (%d already held). Agents see them as unconfirmed until one restates them.\n", res.Imported, res.Skipped)
-	return nil
+	return tui.Work(cmd.OutOrStdout(), "Importing memories", func(tui.StepFunc) (string, error) {
+		res, err := st.Import(cmd.Context(), args[0], now().UnixMilli())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Imported %d memories as candidates (%d already held). Agents see them as unconfirmed until one restates them.", res.Imported, res.Skipped), nil
+	})
 }
 
 func gateRoot(cmd *cobra.Command, cwd string) string {
@@ -167,8 +171,34 @@ func runMemoryList(cmd *cobra.Command, _ []string) error {
 		for _, h := range hits {
 			es = append(es, h.Entry)
 		}
+	} else if all, _ := cmd.Flags().GetBool("all"); all {
+		// Candidates too, as the app's memory panel shows them.
+		if es, err = st.List(ctx, kind, 10000); err != nil {
+			return err
+		}
 	} else if es, err = st.Active(ctx, kinds...); err != nil {
 		return err
+	}
+	if interactive() {
+		out := cmd.OutOrStdout()
+		tui.Header(out, "memory", "list")
+		fmt.Fprintln(out)
+		if len(es) == 0 {
+			tui.Note(out, "No memories here yet.")
+			return nil
+		}
+		var rows [][]string
+		for _, e := range es {
+			state := tui.Dot(tui.Good, e.State)
+			if e.State == record.StateCandidate {
+				state = tui.Dot(tui.Idle, e.State)
+			}
+			rows = append(rows, []string{fmt.Sprint(e.ID), strings.ReplaceAll(e.Kind, "_", " "), state,
+				tui.Fit(strings.Join(strings.Fields(e.Content), " "), max(tui.Width()-50, 20))})
+		}
+		fmt.Fprint(out, tui.Table([]string{"id", "kind", "state", "memory"}, rows))
+		tui.Note(out, fmt.Sprintf("%d memories · atlas memory browse to read them", len(es)))
+		return nil
 	}
 	for _, e := range es {
 		fmt.Fprintf(cmd.OutOrStdout(), "%d\t%s\t%s\t%s\n", e.ID, e.Kind, e.State, strings.Join(strings.Fields(e.Content), " "))

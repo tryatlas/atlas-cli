@@ -51,13 +51,13 @@ func TestBrowser(t *testing.T) {
 	m := New(context.Background(), f, "/repo")
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
 	s := ansi.ReplaceAllString(m.View().Content, "")
-	for _, want := range []string{"Shared memory · /repo", "[all]", "decision     Use Postgres", "db/ledger.go:3-9", "claude-acp"} {
+	for _, want := range []string{"Atlas  memory / all", "/repo", "Entries · 2", "decision     Use Postgres", "db/ledger.go:3-9", "claude-acp", "[TAB] kind"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q\n%s", want, s)
 		}
 	}
 	key(m, "h", 'h')
-	if s := ansi.ReplaceAllString(m.View().Content, ""); !strings.Contains(s, "rev 1 · insert · codex-acp") || !strings.Contains(s, "Use MySQL") {
+	if s := ansi.ReplaceAllString(m.View().Content, ""); !strings.Contains(s, "HISTORY") || !strings.Contains(s, "rev 1 · insert · codex-acp") || !strings.Contains(s, "Use MySQL") {
 		t.Fatal(s)
 	}
 	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})

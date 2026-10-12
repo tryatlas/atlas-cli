@@ -292,10 +292,13 @@ func turnOf(msgs []message) *hooks.Turn {
 	return t
 }
 
-// toolOf translates a tool part.
+// toolOf translates a tool part. Its id is the callID, which the plugin's
+// tool.execute.after hook also receives (opencode.go toolOf): one id for one
+// call, however it arrives. The part id (prt_…) stands in when a part has no
+// callID.
 func toolOf(p part, fallbackID string) *record.Tool {
 	tool := &record.Tool{NativeID: p.CallID, Name: p.Tool, Status: "completed"}
-	if p.ID != "" {
+	if tool.NativeID == "" {
 		tool.NativeID = p.ID
 	}
 	if tool.NativeID == "" {

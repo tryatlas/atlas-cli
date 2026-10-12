@@ -4,7 +4,7 @@
 // owner-only Unix socket that carries the control endpoints: /sync for
 // atlas capture sync and retry, /hook for turns delivered by agent hooks, and
 // /mcp for the memory bridge of agents run in their own UIs (ADR-0013). Both
-// are published in .atlas/cli-run.json.
+// are published in the CLI's state directory (clistate) as run.json.
 package listener
 
 import (
@@ -15,17 +15,18 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/tryatlas/atlas-cli/internal/clistate"
 	"github.com/tryatlas/atlas-cli/internal/memory/server"
 	"github.com/tryatlas/atlas-cli/internal/timefmt"
 )
 
-// RunFile is <Project>/.atlas/cli-run.json while a listener runs.
+// RunFile is the Project's run.json in the CLI state directory while a
+// listener runs.
 type RunFile struct {
 	PID       int    `json:"pid"`
 	Port      int    `json:"port"`
@@ -35,7 +36,7 @@ type RunFile struct {
 }
 
 // RunFilePath is where a Project's run file lives.
-func RunFilePath(root string) string { return filepath.Join(root, ".atlas", "cli-run.json") }
+func RunFilePath(root string) string { return clistate.Path(root, "run.json") }
 
 // ReadRunFile returns the running listener's file, or nil when none runs.
 func ReadRunFile(root string) *RunFile {
@@ -161,11 +162,7 @@ func Start(root, version string, opt Options) (*Listener, error) {
 
 	rf := RunFile{PID: os.Getpid(), Port: ln.Port, StartedAt: timefmt.RFC3339(time.Now()), Socket: sock, Daemon: opt.Daemon}
 	b, _ := json.Marshal(rf)
-	if err := os.MkdirAll(filepath.Join(root, ".atlas"), 0o755); err != nil {
-		_ = ln.Stop()
-		return nil, err
-	}
-	if err := os.WriteFile(RunFilePath(root), b, 0o644); err != nil { //nolint:gosec // G306: holds no secret
+	if err := os.WriteFile(RunFilePath(root), b, 0o600); err != nil {
 		_ = ln.Stop()
 		return nil, err
 	}

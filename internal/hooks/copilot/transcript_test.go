@@ -144,6 +144,9 @@ func TestReadCurrentReleaseShape(t *testing.T) {
 		tool.Result == nil || !strings.HasPrefix(*tool.Result, `{"content":"Added 1 file(s)`) {
 		t.Fatalf("%+v", tool)
 	}
+	if string(tool.Arguments) != `{"patch":"*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch\n"}` {
+		t.Fatalf("the bare patch string takes the hook payload's shape: %s", tool.Arguments)
+	}
 	if turn.Items[1].Tool != nil || turn.Items[1].Body != "Created note.txt." {
 		t.Fatalf("an empty-content message is no item; the final one is: %+v", turn.Items[1])
 	}

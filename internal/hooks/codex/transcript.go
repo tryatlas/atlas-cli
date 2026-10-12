@@ -180,11 +180,20 @@ func readItem(t *hooks.Turn, tools map[string]int, it item, idx int) {
 			return
 		}
 		// Code mode (Codex 0.153): the model edits files from a JavaScript
-		// script run by the exec tool, as tools.apply_patch("…"). Each patch
+		// script run by the exec tool, as tools.apply_patch("…"), and runs
+		// shell commands as tools.exec_command({"cmd": …}). Each patch
 		// becomes its own apply_patch call so the edit and its files are
-		// attributed; the script stays only when it also called other
-		// tools, and then it keeps the call id and the output.
+		// attributed; a script that only runs one command becomes that
+		// exec_command call, whose cmd is what the PostToolUse hook reported
+		// as the command (codex.go toolOf); the script itself stays only
+		// when it did more, and then it keeps the call id and the output.
 		patches, others := CodeModePatches(it.Input)
+		if len(patches) == 0 {
+			if args, ok := CodeModeCommand(it.Input); ok {
+				addTool(t, tools, &record.Tool{NativeID: it.CallID, Name: "exec_command", Arguments: args, Status: "completed"})
+				return
+			}
+		}
 		if len(patches) == 0 || others {
 			addTool(t, tools, &record.Tool{NativeID: it.CallID, Name: it.Name, Status: "completed", Arguments: hooks.Raw(map[string]string{"input": it.Input})})
 		}

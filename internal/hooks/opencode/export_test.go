@@ -75,8 +75,8 @@ func TestTurnOf(t *testing.T) {
 	if write == nil || write.Name != "write" || write.Locations != nil || !strings.Contains(string(write.Arguments), `"filePath": "/x/hello.txt"`) {
 		t.Fatalf("write %+v", write)
 	}
-	patch := turn.Items[3].Tool
-	if patch == nil || patch.NativeID != "prt_ap" || strings.Join(patch.Locations, ",") != "/x/a.go,/x/b.go" {
+	patch := turn.Items[3].Tool // the callID wins over the part id: it is what the tool hook sends too
+	if patch == nil || patch.NativeID != "call_p" || strings.Join(patch.Locations, ",") != "/x/a.go,/x/b.go" {
 		t.Fatalf("apply_patch %+v", patch)
 	}
 	bash := turn.Items[4].Tool

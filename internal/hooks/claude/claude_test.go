@@ -28,6 +28,15 @@ func TestParse(t *testing.T) {
 			t.Fatal("stop-failure must mark the turn failed")
 		}
 	}
+	post := `{"session_id":"abc","transcript_path":"/t/abc.jsonl","cwd":"/w","hook_event_name":"PostToolUse","tool_name":"Write","tool_use_id":"toolu_01","tool_input":{"file_path":"/w/x.txt","content":"hi"},"tool_response":{"filePath":"/w/x.txt","success":true}}`
+	ev, err = a.Parse(VerbPostToolUse, []byte(post))
+	if err != nil || ev.Kind != hooks.ToolUse || ev.Tool == nil || ev.Tool.NativeID != "toolu_01" || ev.Tool.Name != "Write" ||
+		string(ev.Tool.Arguments) != `{"file_path":"/w/x.txt","content":"hi"}` || ev.Tool.Result == nil || !strings.Contains(*ev.Tool.Result, "success") {
+		t.Fatalf("post-tool-use → %+v %v", ev, err)
+	}
+	if ev, _ := a.Parse(VerbPostToolUse, []byte(`{"session_id":"abc"}`)); ev != nil {
+		t.Fatal("a tool payload without a call must be nil")
+	}
 	if ev, err := a.Parse("unknown", []byte(payload)); ev != nil || err != nil {
 		t.Fatal("unknown verb must be nil, nil")
 	}
@@ -67,7 +76,7 @@ func TestInstallWritesTheLocalSettings(t *testing.T) {
 	if err := json.Unmarshal(b, &obj); err != nil {
 		t.Fatal(err)
 	}
-	for _, typ := range []string{"SessionStart", "UserPromptSubmit", "Stop", "StopFailure", "PreCompact", "SessionEnd"} {
+	for _, typ := range []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "StopFailure", "PreCompact", "SessionEnd"} {
 		g := obj.Hooks[typ]
 		if len(g) != 1 || len(g[0].Hooks) != 1 || g[0].Hooks[0].Type != "command" || !hooks.Owned(g[0].Hooks[0].Command) {
 			t.Fatalf("%s: %+v", typ, g)

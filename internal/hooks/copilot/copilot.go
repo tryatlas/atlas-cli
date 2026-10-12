@@ -36,6 +36,7 @@ type Agent struct{}
 const (
 	VerbSessionStart    = "session-start"
 	VerbPromptSubmitted = "user-prompt-submitted"
+	VerbPostToolUse     = "post-tool-use"
 	VerbAgentStop       = "agent-stop"
 	VerbSessionEnd      = "session-end"
 )
@@ -44,6 +45,7 @@ const (
 const (
 	eventSessionStart        = "sessionStart"
 	eventUserPromptSubmitted = "userPromptSubmitted"
+	eventPostToolUse         = "postToolUse"
 	eventAgentStop           = "agentStop"
 	eventSessionEnd          = "sessionEnd"
 )
@@ -59,7 +61,7 @@ func (Agent) Binary() string { return "copilot" }
 
 // Verbs are the hook verbs the installed config invokes.
 func (Agent) Verbs() []string {
-	return []string{VerbSessionStart, VerbPromptSubmitted, VerbAgentStop, VerbSessionEnd}
+	return []string{VerbSessionStart, VerbPromptSubmitted, VerbPostToolUse, VerbAgentStop, VerbSessionEnd}
 }
 
 // HooksPath is the hook file Atlas owns. Copilot auto-discovers every JSON
@@ -90,6 +92,7 @@ func wanted() hookFile {
 	return hookFile{Version: 1, Hooks: map[string][]hookEntry{
 		eventSessionStart:        entry(VerbSessionStart),
 		eventUserPromptSubmitted: entry(VerbPromptSubmitted),
+		eventPostToolUse:         entry(VerbPostToolUse),
 		eventAgentStop:           entry(VerbAgentStop),
 		eventSessionEnd:          entry(VerbSessionEnd),
 	}}
@@ -191,7 +194,10 @@ func TranscriptPath(sessionID string) string {
 
 // Parse maps a hook verb and payload to an event. Copilot's keys are
 // camelCase (sessionId, transcriptPath, cwd, prompt); the snake_case forms
-// VS Code's hook host sends are accepted too.
+// VS Code's hook host sends are accepted too. A postToolUse payload becomes
+// a ToolUse event carrying the completed call (tool.go), which the dispatcher
+// records into the open turn as it fires; a payload naming no tool is
+// nothing to do.
 func (Agent) Parse(verb string, raw []byte) (*hooks.Event, error) {
 	m, err := hooks.Decode(raw)
 	if err != nil {
@@ -208,6 +214,11 @@ func (Agent) Parse(verb string, raw []byte) (*hooks.Event, error) {
 	case VerbPromptSubmitted:
 		ev.Kind = hooks.TurnStart
 		ev.Prompt = hooks.Str(m, "prompt")
+	case VerbPostToolUse:
+		ev.Kind = hooks.ToolUse
+		if ev.Tool = toolOf(raw, ev.Cwd); ev.Tool == nil {
+			return nil, nil
+		}
 	case VerbAgentStop:
 		ev.Kind = hooks.TurnEnd
 	case VerbSessionEnd:

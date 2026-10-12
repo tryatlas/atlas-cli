@@ -32,6 +32,11 @@ func TestPluginInstallStateUninstall(t *testing.T) {
 			t.Fatalf("plugin does not send %s", verb)
 		}
 	}
+	for _, hook := range []string{`"tool.execute.before"`, `"tool.execute.after"`, `sendSync("tool-use"`} {
+		if !strings.Contains(string(b), hook) {
+			t.Fatalf("plugin lacks %s", hook)
+		}
+	}
 	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o644 {
 		t.Fatalf("mode %v", fi.Mode().Perm())
 	}
@@ -124,13 +129,40 @@ func TestParse(t *testing.T) {
 			t.Fatalf("%s: transcript %q", c.verb, ev.Transcript)
 		}
 	}
+	// tool-use: OpenCode's tool.execute.after as the plugin forwards it, with
+	// the id the export's tool part carries as callID.
+	toolUse := `{"session_id":"` + id + `","tool":"write","call_id":"ZdNFvSAofdecladc","title":"rt.txt","output":"Wrote file successfully.",` +
+		`"metadata":{"diagnostics":{},"filepath":"/w/rt.txt","exists":false},"args":{"filePath":"/w/rt.txt","content":"realtime\n"}}`
+	ev, err := a.Parse(VerbToolUse, []byte(toolUse))
+	if err != nil || ev == nil || ev.Kind != hooks.ToolUse || ev.SessionID != id || ev.Tool == nil {
+		t.Fatalf("tool-use: %+v %v", ev, err)
+	}
+	if tool := ev.Tool; tool.NativeID != "ZdNFvSAofdecladc" || tool.Name != "write" || tool.Title != "rt.txt" || tool.Status != "completed" ||
+		string(tool.Arguments) != `{"filePath":"/w/rt.txt","content":"realtime\n"}` || tool.Result == nil || *tool.Result != "Wrote file successfully." || tool.Locations != nil {
+		t.Fatalf("tool-use tool: %+v", tool)
+	}
+	if !strings.HasSuffix(ev.Transcript, filepath.Join("hooks", ID, "export", id+".json")) {
+		t.Fatalf("tool-use names no export cache: %q", ev.Transcript)
+	}
+	// apply_patch's metadata lists the files it wrote; null args and a
+	// missing output are nothing, not "null".
+	ev, err = a.Parse(VerbToolUse, []byte(`{"session_id":"`+id+`","tool":"apply_patch","call_id":"call_p","metadata":{"files":[{"filePath":"/w/a.go"},{"filePath":"/w/b.go"}]},"args":null}`))
+	if err != nil || ev == nil || ev.Tool == nil || strings.Join(ev.Tool.Locations, ",") != "/w/a.go,/w/b.go" || ev.Tool.Arguments != nil || ev.Tool.Result != nil {
+		t.Fatalf("apply_patch tool-use: %+v %v", ev.Tool, err)
+	}
+	// Without a call id or a tool name there is no call to record.
+	for _, raw := range []string{`{"session_id":"` + id + `","tool":"bash"}`, `{"session_id":"` + id + `","call_id":"c1"}`} {
+		if ev, err := a.Parse(VerbToolUse, []byte(raw)); ev != nil || err != nil {
+			t.Fatalf("tool-use without a call: %+v %v", ev, err)
+		}
+	}
 	if ev, err := a.Parse("something-else", []byte(`{"session_id":"x"}`)); ev != nil || err != nil {
 		t.Fatalf("unknown verb: %v %v", ev, err)
 	}
 	if _, err := a.Parse(VerbTurnEnd, []byte(`not json`)); err == nil {
 		t.Fatal("bad payload accepted")
 	}
-	ev, err := a.Parse(VerbTurnEnd, []byte(`{"session_id":"../../etc"}`))
+	ev, err = a.Parse(VerbTurnEnd, []byte(`{"session_id":"../../etc"}`))
 	if err != nil || ev.Transcript != "" {
 		t.Fatalf("an unusable id named a cache: %+v %v", ev, err)
 	}

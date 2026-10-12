@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/hooks"
 )
 
@@ -119,6 +118,31 @@ func prompt(content string) string {
 	return strings.TrimSpace(content)
 }
 
+// pendingPrompt is the prompt of a USER_INPUT step that no model step
+// follows: the turn agy is about to start answering when PreInvocation
+// fires, since agy writes the prompt step before the hook. A transcript
+// whose last steps are the model's (a follow-up invocation within a turn),
+// or none at all, gives "".
+func pendingPrompt(path string) string {
+	var pending string
+	err := eachNonBlankLine(path, func(_ int, raw []byte) {
+		var s step
+		if json.Unmarshal(raw, &s) != nil {
+			return
+		}
+		switch {
+		case s.Type == "USER_INPUT":
+			pending = prompt(s.Content)
+		case s.Source == "MODEL":
+			pending = ""
+		}
+	})
+	if err != nil {
+		return ""
+	}
+	return pending
+}
+
 // Read parses the steps from a position into a turn. A step agy marks as
 // truncated is still read for what it holds. Usage is the sum of the steps'
 // token fields when any step has them. No model: the transcript names none
@@ -154,20 +178,8 @@ func (reader) Read(path string, from int) (*hooks.Turn, int, error) {
 				if tc.Name == "" {
 					continue
 				}
-				tool := &record.Tool{
-					NativeID:  id + "-" + strconv.Itoa(i),
-					Name:      tc.Name,
-					Kind:      toolKinds[tc.Name],
-					Arguments: decodeArgs(tc.Args),
-					Status:    "completed",
-				}
-				if writeTools[tc.Name] {
-					if target, _ := decodeString(tc.Args["TargetFile"]); target != "" {
-						tool.Locations = []string{target}
-					}
-				}
 				open = append(open, len(t.Items))
-				t.Items = append(t.Items, hooks.Item{Tool: tool})
+				t.Items = append(t.Items, hooks.Item{Tool: tc.tool(id + "-" + strconv.Itoa(i))})
 			}
 		case "CONVERSATION_HISTORY", "SYSTEM_MESSAGE":
 			// agy's own bookkeeping and injected notices.

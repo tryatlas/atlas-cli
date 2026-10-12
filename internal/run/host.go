@@ -7,6 +7,7 @@ package run
 import (
 	"context"
 	"errors"
+	"os"
 	"time"
 
 	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
@@ -43,12 +44,33 @@ type Host struct {
 	lock   *store.WriterLock
 	cancel context.CancelFunc
 	done   chan struct{}
+	opened os.FileInfo // sessions.db as the host opened it; nil when there was none
+	held   *os.File    // a handle on that file: unlinked means .atlas/ went away
+}
+
+// Stale reports that the Project's store is no longer the one this host
+// opened: .atlas/ was deleted or re-created (atlas init again, or by hand),
+// or a store appeared where there was none. A stale host must stop; it
+// would otherwise keep writing into a deleted file.
+func (h *Host) Stale() bool {
+	now, err := os.Stat(store.Path(h.Root))
+	switch {
+	case h.opened == nil:
+		return err == nil
+	case err != nil || deleted(h.held):
+		return true
+	}
+	return !os.SameFile(h.opened, now)
 }
 
 // StartHost takes the writer lock, opens the capture store, and starts the
 // listener and the drain.
 func StartHost(root string, opt HostOptions) (*Host, error) {
 	h := &Host{Root: root, done: make(chan struct{})}
+	if fi, err := os.Stat(store.Path(root)); err == nil {
+		h.opened = fi
+		h.held, _ = os.Open(store.Path(root))
+	}
 	lock, err := store.Lock(root)
 	switch {
 	case errors.Is(err, store.ErrLocked) && opt.CaptureOptional:
@@ -94,6 +116,9 @@ func StartHost(root string, opt HostOptions) (*Host, error) {
 func (h *Host) Capturing() bool { return h.Recorder != nil }
 
 func (h *Host) release() {
+	if h.held != nil {
+		_ = h.held.Close()
+	}
 	if h.Store != nil {
 		_ = h.Store.Close()
 	}

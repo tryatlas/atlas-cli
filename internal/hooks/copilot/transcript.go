@@ -20,6 +20,12 @@ import (
 // message it paid for, so a turn's usage is their sum. Older releases put
 // outputTokens on assistant.message instead; that is read when no
 // usage_record was seen.
+//
+// Since the postToolUse hook delivers each call as it completes, the items
+// read here are mostly the dispatcher's dedupe material at turn end: their
+// arguments take the same shape as the hook's (toolArguments) so the two
+// hash alike, and fileEdits give the written paths the hook's patch paths
+// are matched against. Calls the hook did not report stay as items.
 type reader struct{}
 
 // Position is the line count.
@@ -146,7 +152,7 @@ func (reader) Read(path string, from int) (*hooks.Turn, int, error) {
 			}
 			tools[id] = len(t.Items)
 			t.Items = append(t.Items, hooks.Item{Tool: &record.Tool{
-				NativeID: id, Name: te.ToolName, Arguments: te.Arguments, Status: "running",
+				NativeID: id, Name: te.ToolName, Arguments: toolArguments(te.Arguments), Status: "running",
 			}})
 		case "tool.execution_complete":
 			var te toolEvent
@@ -163,7 +169,7 @@ func (reader) Read(path string, from int) (*hooks.Turn, int, error) {
 				// the call still counts, with what the completion says.
 				i = len(t.Items)
 				tools[id] = i
-				t.Items = append(t.Items, hooks.Item{Tool: &record.Tool{NativeID: id, Name: te.ToolName, Arguments: te.Arguments}})
+				t.Items = append(t.Items, hooks.Item{Tool: &record.Tool{NativeID: id, Name: te.ToolName, Arguments: toolArguments(te.Arguments)}})
 			}
 			tool := t.Items[i].Tool
 			tool.Status = "completed"

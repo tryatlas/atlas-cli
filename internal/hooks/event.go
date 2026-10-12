@@ -1,7 +1,7 @@
 // Package hooks captures sessions run in an agent's own UI through the
 // agent's lifecycle hooks (ADR-0013). Each agent integration translates its
 // native hook payload into one Event; the dispatcher does the rest: session
-// state under .atlas/hooks/, the transcript read from the offset recorded at
+// state in the CLI state directory, the transcript read from the offset recorded at
 // turn start, the git status diff, and delivery to the capture store.
 package hooks
 
@@ -13,6 +13,7 @@ import (
 	"os"
 	"regexp"
 
+	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 )
 
@@ -63,13 +64,14 @@ type Event struct {
 	Model      string
 	Usage      *store.TokenTotals // a hook-provided usage total for the turn
 	Files      []string           // ToolUse: files the tool changed
+	Tool       *record.Tool       // ToolUse: the completed call, when the payload carries it
 	ToolUseID  string
 	// TurnEndFailed marks a turn that ended on an API error.
 	TurnEndFailed bool
 }
 
 // sessionIDPattern is what a session id may look like before it becomes a
-// file name under .atlas/hooks/.
+// file name in the hooks state directory.
 var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$`)
 
 // ErrBadSessionID is a session id that cannot be a file name.

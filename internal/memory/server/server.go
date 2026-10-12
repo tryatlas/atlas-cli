@@ -87,7 +87,11 @@ func (s *Server) store(ctx context.Context, cwd string) (*record.Store, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if st, ok := s.stores[scope]; ok {
-		return st, nil
+		if !st.Stale() {
+			return st, nil
+		}
+		_ = st.Close() // .atlas/ was deleted or re-created: open the new record
+		delete(s.stores, scope)
 	}
 	st, err := record.Open(scope, true)
 	if err != nil {
@@ -114,6 +118,7 @@ func (s *Server) SessionStarted(ctx context.Context, g Grant) {
 	}
 	if st, err := s.store(ctx, g.Cwd); err == nil {
 		_ = st.SessionStart(ctx, g.SessionID, g.Agent, s.now())
+		_, _ = st.SnapshotIfDue(s.now()) // the desktop's daily backup, at most once a day
 	}
 }
 
@@ -146,7 +151,22 @@ func (s *Server) SessionEnded(ctx context.Context, g Grant) {
 		return
 	}
 	if st, err := s.store(ctx, g.Cwd); err == nil {
-		_ = st.SessionEnd(ctx, g.SessionID, g.Agent, s.now())
+		now := s.now()
+		_ = st.SessionEnd(ctx, g.SessionID, g.Agent, now)
+		// The handoff note the next session's briefing shows, as the
+		// desktop's lifecycle writes it.
+		_ = st.WriteHandoff(ctx, g.SessionID, g.Agent, project.ScopeRoot(ctx, g.Cwd), now)
+	}
+}
+
+// Capture records the marked lines of an agent's reply as candidate
+// memories when sharing is on (the desktop's memory_delta).
+func (s *Server) Capture(ctx context.Context, g Grant, reply string) {
+	if g.SessionID == "" || strings.TrimSpace(reply) == "" || !sharingOn(ctx, g.Cwd) {
+		return
+	}
+	if st, err := s.store(ctx, g.Cwd); err == nil {
+		_, _ = st.CaptureCandidates(ctx, reply, g.Agent, g.SessionID, s.now())
 	}
 }
 

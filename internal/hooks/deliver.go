@@ -16,6 +16,7 @@ import (
 	"sort"
 	"time"
 
+	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
 	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 	"github.com/tryatlas/atlas-cli/internal/listener"
@@ -34,8 +35,10 @@ var ErrSpooled = errors.New("spooled")
 // SpoolDir holds deliveries waiting for a writer.
 func SpoolDir(root string) string { return filepath.Join(Dir(root), "spool") }
 
-// Deliver is the default Dispatcher.Deliver.
-func Deliver(version string) func(ctx context.Context, d Delivery) error {
+// Deliver is the default Dispatcher.Deliver. afterDirect, when set, runs
+// after a direct write with the store still open: the caller syncs the new
+// rows to the cloud there, so a turn does not wait for the next atlas serve.
+func Deliver(version string, afterDirect func(ctx context.Context, st *store.Store, d Delivery)) func(ctx context.Context, d Delivery) error {
 	return func(ctx context.Context, d Delivery) error {
 		if rf := listener.ReadRunFile(d.Root); rf != nil {
 			if err := postHook(ctx, rf.Socket, d); err == nil {
@@ -44,7 +47,7 @@ func Deliver(version string) func(ctx context.Context, d Delivery) error {
 			// The listener is there but did not answer: fall through to a
 			// direct write, which fails on its lock and spools.
 		}
-		err := applyDirect(ctx, version, d.Root, []Delivery{d})
+		err := applyDirect(ctx, version, d.Root, []Delivery{d}, afterDirect)
 		if errors.Is(err, store.ErrLocked) {
 			if serr := spool(d); serr != nil {
 				return serr
@@ -59,6 +62,22 @@ func Deliver(version string) func(ctx context.Context, d Delivery) error {
 // listener and the direct path share it.
 func Apply(ctx context.Context, rec *record.Recorder, mem *server.Server, ds []Delivery) error {
 	for _, d := range ds {
+		if err := apply1(ctx, rec, mem, d); err != nil {
+			return err
+		}
+		if d.LinkFrom != "" {
+			// Touches that landed after a commit the post-commit hook
+			// already walked: link the turn's commits now.
+			if _, err := gitlink.LinkRange(ctx, rec.Store, d.Root, d.LinkFrom, time.Now); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func apply1(ctx context.Context, rec *record.Recorder, mem *server.Server, d Delivery) error {
+	{
 		g := server.Grant{SessionID: d.Session.NativeID, Agent: d.Session.Agent, Cwd: d.Root}
 		switch {
 		case d.Start:
@@ -69,12 +88,37 @@ func Apply(ctx context.Context, rec *record.Recorder, mem *server.Server, ds []D
 			if mem != nil {
 				mem.SessionEnded(ctx, g)
 			}
+		case d.Open != nil:
+			if _, err := rec.OpenTurn(ctx, d.Session, d.Open.Prompt, d.Open.At); err != nil {
+				return err
+			}
+		case d.Tool != nil:
+			if err := rec.RecordTool(ctx, d.Session, *d.Tool, d.Changed, d.At); err != nil {
+				return err
+			}
+			if mem != nil {
+				one := []record.CapturedItem{{Tool: d.Tool}}
+				foldChanges(ctx, mem, g, d.Root, &record.CapturedTurn{Items: one, Changed: d.Changed})
+				foldPlans(ctx, mem, g, one)
+				if d.Plan != nil {
+					_ = mem.Fold(ctx, g, memrecord.Event{Kind: "plan_set", Text: d.Plan.Text, Status: d.Plan.Status})
+				}
+			}
 		case d.Turn != nil:
 			if _, err := rec.RecordTurn(ctx, d.Session, *d.Turn); err != nil {
 				return err
 			}
 			if mem != nil {
 				foldChanges(ctx, mem, g, d.Root, d.Turn)
+				foldPlans(ctx, mem, g, d.Turn.Items)
+				if d.Plan != nil {
+					_ = mem.Fold(ctx, g, memrecord.Event{Kind: "plan_set", Text: d.Plan.Text, Status: d.Plan.Status})
+				}
+				for _, it := range d.Turn.Items {
+					if it.Tool == nil && it.Mode != "thinking" {
+						mem.Capture(ctx, g, it.Body)
+					}
+				}
 			}
 		}
 	}
@@ -114,7 +158,7 @@ func foldChanges(ctx context.Context, mem *server.Server, g server.Grant, root s
 
 // applyDirect takes the writer lock for the duration of the write, drains
 // the spool first, then applies ds.
-func applyDirect(ctx context.Context, version, root string, ds []Delivery) error {
+func applyDirect(ctx context.Context, version, root string, ds []Delivery, after func(ctx context.Context, st *store.Store, d Delivery)) error {
 	lock, err := store.Lock(root)
 	if err != nil {
 		return err
@@ -135,6 +179,11 @@ func applyDirect(ctx context.Context, version, root string, ds []Delivery) error
 		return err
 	}
 	ClearLastError(root)
+	if after != nil {
+		for _, d := range ds {
+			after(ctx, st, d)
+		}
+	}
 	return nil
 }
 

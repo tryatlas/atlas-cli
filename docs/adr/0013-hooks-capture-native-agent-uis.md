@@ -51,7 +51,7 @@ the product.
    Commits are linked by the existing walk (`atlas capture link`), now also
    run from a `post-commit` git hook. No git refs, no commit trailers.
 4. **Hooks never fail the agent.** Every hook exits 0; errors go to
-   `.atlas/cli-hooks.log` and the last one shows in `atlas status`. Stdout
+   `hooks.log` in the CLI state directory and the last one shows in `atlas status`. Stdout
    carries only the agent's own response shape (the SessionStart banner).
    Every hook runs under a deadline. The installed command is wrapped in
    `sh -c 'if ! command -v atlas >/dev/null 2>&1; then exit 0; fi; exec atlas
@@ -59,7 +59,7 @@ the product.
 5. **Delivery.** A hook writes to the store itself when it can take the
    writer lock; when `atlas serve` holds it, the hook posts the turn to the
    listener's owner-only Unix socket; when the desktop app holds it, the turn
-   is spooled under `.atlas/hooks/spool/` and drained by the next writer.
+   is spooled in the CLI state directory (`hooks/spool/`) and drained by the next writer.
 6. **Shared memory reaches native UIs through MCP config.** `atlas agents
    add` also writes the `atlas_memory` server entry into the agent's MCP
    config as a stdio entry `atlas mcp-bridge --project <root> --agent <id>`
@@ -75,9 +75,21 @@ the product.
    group until their removal is agreed, and are no longer documented as the
    product.
 
+9. **Per event, not per turn** (added 2026-10-12). The prompt opens the turn
+   in the store as it is submitted; each tool call is recorded as the
+   agent's post-tool hook fires (Claude Code, Codex, Copilot, Droid and
+   Antigravity have a generic one; Cursor's file-edit and shell hooks,
+   OpenCode's plugin and Pi's extension carry the same information); the
+   turn closes at Stop with the transcript's text and usage, and transcript
+   tool items that duplicate a delivered call are dropped (same id,
+   arguments, shell command or written paths). Each delivery syncs. Token
+   streaming is out of reach for hooks.
+
 ## Consequences
 
-- Native-UI sessions get file touches and checkpoints again, live.
+- Native-UI sessions get file touches and checkpoints again, live: the
+  prompt and each tool call reach the cloud within seconds; the reply at
+  turn end.
 - One integration per agent is the price; the external-agent protocol is
   a later addition.
 - A hook-captured turn's file changes are attributed to the tool that wrote

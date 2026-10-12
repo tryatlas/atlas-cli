@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -79,10 +80,13 @@ func TestInstallUninstall(t *testing.T) {
 	if got := commands(hk["Stop"]); len(got) != 1 || got[0] != hooks.Wrap(hooks.Command(ID, VerbStop)) {
 		t.Fatalf("Stop should hold only the current hook (stale pruned): %q", got)
 	}
-	for typ, verb := range map[string]string{"UserPromptSubmit": VerbPromptSubmit, "PreCompact": VerbPreCompact, "SessionEnd": VerbSessionEnd} {
+	for typ, verb := range map[string]string{"UserPromptSubmit": VerbPromptSubmit, "PostToolUse": VerbPostToolUse, "PreCompact": VerbPreCompact, "SessionEnd": VerbSessionEnd} {
 		if got := commands(hk[typ]); len(got) != 1 || got[0] != hooks.Wrap(hooks.Command(ID, verb)) {
 			t.Fatalf("%s: %q", typ, got)
 		}
+	}
+	if post := hk["PostToolUse"]; len(post) != 1 || post[0].Matcher == nil || *post[0].Matcher != "" {
+		t.Fatalf("PostToolUse should match every tool with matcher \"\": %+v", post)
 	}
 	if a.State(root) != hooks.Current {
 		t.Fatalf("state after install: %v", a.State(root))
@@ -171,8 +175,62 @@ func TestParse(t *testing.T) {
 	if ev, err := a.Parse("notification", []byte(`{`+base+`}`)); err != nil || ev != nil {
 		t.Fatalf("unknown verb: %v %v", ev, err)
 	}
+	if !slices.Contains(a.Verbs(), VerbPostToolUse) {
+		t.Fatalf("verbs should include post-tool-use: %q", a.Verbs())
+	}
 	if _, err := a.Parse(VerbStop, []byte(`nope`)); err == nil {
 		t.Fatal("bad JSON should error")
+	}
+}
+
+func TestParsePostToolUse(t *testing.T) {
+	a := Agent{}
+	base := `"session_id":"s-1","transcript_path":"/h/.factory/sessions/repo/s-1.jsonl","cwd":"/w","hook_event_name":"PostToolUse"`
+	// An object response is kept as its JSON text.
+	post := `{` + base + `,"tool_name":"Edit","tool_use_id":"toolu_01","tool_input":{"file_path":"/w/main.go","old_string":"a","new_string":"b"},"tool_response":{"filePath":"/w/main.go","success":true}}`
+	ev, err := a.Parse(VerbPostToolUse, []byte(post))
+	if err != nil || ev == nil || ev.Kind != hooks.ToolUse || ev.SessionID != "s-1" || ev.Transcript != "/h/.factory/sessions/repo/s-1.jsonl" || ev.Cwd != "/w" {
+		t.Fatalf("post-tool-use: %+v %v", ev, err)
+	}
+	tool := ev.Tool
+	if tool == nil || tool.NativeID != "toolu_01" || tool.Name != "Edit" || tool.Status != "completed" ||
+		string(tool.Arguments) != `{"file_path":"/w/main.go","old_string":"a","new_string":"b"}` ||
+		tool.Result == nil || *tool.Result != `{"filePath":"/w/main.go","success":true}` {
+		t.Fatalf("tool: %+v", tool)
+	}
+	// A string response is kept verbatim.
+	ev, err = a.Parse(VerbPostToolUse, []byte(`{`+base+`,"tool_name":"Execute","tool_use_id":"toolu_02","tool_input":{"command":"go test ./..."},"tool_response":"ok\n"}`))
+	if err != nil || ev == nil || ev.Tool == nil || ev.Tool.Result == nil || *ev.Tool.Result != "ok\n" || ev.Tool.NativeID != "toolu_02" {
+		t.Fatalf("string response: %+v %v", ev, err)
+	}
+	// No response at all, or a null one, leaves Result nil.
+	for _, tail := range []string{``, `,"tool_response":null`} {
+		ev, err = a.Parse(VerbPostToolUse, []byte(`{`+base+`,"tool_name":"Read","tool_use_id":"toolu_03","tool_input":{"file_path":"/w/x"}`+tail+`}`))
+		if err != nil || ev == nil || ev.Tool == nil || ev.Tool.Result != nil {
+			t.Fatalf("no response (%q): %+v %v", tail, ev, err)
+		}
+	}
+	// Without a tool id (Droid has been seen to omit it) a stable id is
+	// derived from the call, so it still lands per event; the dispatcher
+	// matches the transcript's call by arguments or written path.
+	noID := `{` + base + `,"tool_name":"Edit","tool_input":{"file_path":"/w/x"},"tool_response":"ok"}`
+	ev, err = a.Parse(VerbPostToolUse, []byte(noID))
+	if err != nil || ev == nil || ev.Tool == nil || !strings.HasPrefix(ev.Tool.NativeID, "droid-") || len(ev.Tool.NativeID) != 22 {
+		t.Fatalf("payload without an id: %+v %v", ev, err)
+	}
+	again, _ := a.Parse(VerbPostToolUse, []byte(noID))
+	if again.Tool.NativeID != ev.Tool.NativeID {
+		t.Fatal("the derived id must be stable")
+	}
+	// Without a name there is nothing to record: nil, and the transcript
+	// supplies the call at Stop.
+	for _, raw := range []string{
+		`{` + base + `,"tool_use_id":"toolu_04","tool_input":{}}`,
+		`{` + base + `}`,
+	} {
+		if ev, err := a.Parse(VerbPostToolUse, []byte(raw)); err != nil || ev != nil {
+			t.Fatalf("payload without a call should be nil: %s → %+v %v", raw, ev, err)
+		}
 	}
 }
 

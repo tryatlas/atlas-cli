@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
 	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 )
@@ -46,9 +47,10 @@ func (fakeAgent) Parse(verb string, payload []byte) (*Event, error) {
 	var p struct {
 		Session, Transcript, Prompt string
 		Files                       []string
+		Tool                        *record.Tool
 	}
 	_ = json.Unmarshal(payload, &p)
-	ev := &Event{SessionID: p.Session, Transcript: p.Transcript, Prompt: p.Prompt, Files: p.Files}
+	ev := &Event{SessionID: p.Session, Transcript: p.Transcript, Prompt: p.Prompt, Files: p.Files, Tool: p.Tool}
 	switch verb {
 	case "start":
 		ev.Kind = SessionStart
@@ -213,7 +215,7 @@ func TestDispatcherRecordsATurnDirectly(t *testing.T) {
 	st := enabledStore(t, root)
 	transcript := filepath.Join(t.TempDir(), "s.jsonl")
 	_ = os.WriteFile(transcript, []byte(`{"kind":"prompt","body":"earlier turn"}`+"\n"), 0o600)
-	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test"), Banner: "Atlas: on"}
+	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test", nil), Banner: "Atlas: on"}
 	sess := map[string]any{"Session": "s-1", "Transcript": transcript}
 
 	if out := runHook(t, d, "start", sess); string(out) != "Atlas: on" {
@@ -291,12 +293,74 @@ func TestDispatcherRecordsATurnDirectly(t *testing.T) {
 	}
 }
 
+func TestPerEventDeliveryOpensAndClosesOneTurn(t *testing.T) {
+	root := gitRepo(t)
+	st := enabledStore(t, root)
+	transcript := filepath.Join(t.TempDir(), "s.jsonl")
+	_ = os.WriteFile(transcript, nil, 0o600)
+	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test", nil)}
+	sess := map[string]any{"Session": "s-4", "Transcript": transcript}
+	runHook(t, d, "start", sess)
+	runHook(t, d, "prompt", map[string]any{"Session": "s-4", "Transcript": transcript, "Prompt": "make a file"})
+	db := st.DB()
+	var n int
+	_ = db.QueryRow(`SELECT count(*) FROM turn WHERE state='open'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("open turns after the prompt = %d, want 1", n)
+	}
+	_ = db.QueryRow(`SELECT count(*) FROM agent_message WHERE role='user'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("prompt rows = %d", n)
+	}
+	// The post-tool hook reports the write as it completes.
+	_ = os.WriteFile(filepath.Join(root, "made.txt"), []byte("x\n"), 0o644)
+	args, _ := json.Marshal(map[string]string{"file_path": filepath.Join(root, "made.txt"), "content": "x\n"})
+	tool := &record.Tool{NativeID: "tc", Name: "Write", Arguments: args, Status: "completed"}
+	runHook(t, d, "tool", map[string]any{"Session": "s-4", "Transcript": transcript, "Tool": tool})
+	var status string
+	if err := db.QueryRow(`SELECT status FROM tool_call WHERE native_call_id='tc'`).Scan(&status); err != nil || status != "completed" {
+		t.Fatalf("tool after the hook: %q %v", status, err)
+	}
+	_ = db.QueryRow(`SELECT count(*) FROM file_touch WHERE path='made.txt'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("touches after the hook = %d", n)
+	}
+	// The transcript names the same call again, plus the reply; the close
+	// must not duplicate the call.
+	f, _ := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	_, _ = f.WriteString(`{"kind":"prompt","body":"make a file"}` + "\n" +
+		`{"kind":"tool","path":"` + filepath.Join(root, "made.txt") + `","body":"x\n"}` + "\n" +
+		`{"kind":"text","body":"Made it."}` + "\n")
+	_ = f.Close()
+	runHook(t, d, "stop", sess)
+	_ = db.QueryRow(`SELECT count(*) FROM turn`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("turns = %d, want 1", n)
+	}
+	_ = db.QueryRow(`SELECT count(*) FROM turn WHERE state='completed'`).Scan(&n)
+	if n != 1 {
+		t.Fatal("the turn must be completed")
+	}
+	_ = db.QueryRow(`SELECT count(*) FROM tool_call`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("tool calls = %d, want 1 (no duplicate from the transcript)", n)
+	}
+	_ = db.QueryRow(`SELECT count(*) FROM file_touch`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("touches = %d, want 1", n)
+	}
+	_ = db.QueryRow(`SELECT count(*) FROM agent_message`).Scan(&n)
+	if n != 2 {
+		t.Fatalf("messages = %d, want the prompt and the reply", n)
+	}
+}
+
 func TestATurnThatOnlyReadRecordsNothing(t *testing.T) {
 	root := gitRepo(t)
 	st := enabledStore(t, root)
 	transcript := filepath.Join(t.TempDir(), "s.jsonl")
 	_ = os.WriteFile(transcript, nil, 0o600)
-	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test")}
+	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test", nil)}
 	sess := map[string]any{"Session": "s-2", "Transcript": transcript}
 	runHook(t, d, "start", sess)
 	runHook(t, d, "prompt", sess)
@@ -317,7 +381,7 @@ func TestSpoolWhenTheStoreIsLockedAndDrainLater(t *testing.T) {
 	}
 	transcript := filepath.Join(t.TempDir(), "s.jsonl")
 	_ = os.WriteFile(transcript, []byte(`{"kind":"prompt","body":"hi"}`+"\n"+`{"kind":"text","body":"hello"}`+"\n"), 0o600)
-	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test")}
+	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test", nil)}
 	sess := map[string]any{"Session": "s-3", "Transcript": transcript}
 	runHook(t, d, "start", sess)
 	runHook(t, d, "prompt", map[string]any{"Session": "s-3", "Transcript": transcript, "Prompt": "hi"})
@@ -328,11 +392,11 @@ func TestSpoolWhenTheStoreIsLockedAndDrainLater(t *testing.T) {
 	_ = stt.Save(root)
 	runHook(t, d, "stop", sess)
 	stt, _ = LoadState(root, "fake", "s-3")
-	if stt.Pending != 2 { // the session start and the turn
-		t.Fatalf("pending = %d, want 2 (spooled)", stt.Pending)
+	if stt.Pending != 3 { // the session start, the opening prompt and the turn
+		t.Fatalf("pending = %d, want 3 (spooled)", stt.Pending)
 	}
 	ents, _ := os.ReadDir(SpoolDir(root))
-	if len(ents) != 2 { // the start and the turn
+	if len(ents) != 3 { // the start, the prompt and the turn
 		t.Fatalf("spool entries = %d", len(ents))
 	}
 	_ = lock.Release()
@@ -407,5 +471,154 @@ func TestGitHooksInstallChainsAndRestores(t *testing.T) {
 	b, _ = os.ReadFile(mine)
 	if string(b) != "#!/bin/sh\necho mine\n" {
 		t.Fatalf("restored = %q", b)
+	}
+}
+
+func tool(id, name, args string) record.CapturedItem {
+	return record.CapturedItem{Tool: &record.Tool{NativeID: id, Name: name, Arguments: json.RawMessage(args), Status: "completed"}}
+}
+
+func TestDropDeliveredPrefersIDsAndKeepsDistinctCommands(t *testing.T) {
+	// Ids match between hook and transcript: two distinct `sleep 4` calls,
+	// one delivered, one whose hook failed; the second must survive.
+	delivered := [][]string{toolKeys(*tool("c1", "Bash", `{"command":"sleep 4"}`).Tool)}
+	items := []record.CapturedItem{tool("c1", "Bash", `{"command":"sleep 4"}`), tool("c2", "Bash", `{"command":"sleep 4"}`), {ID: "m", Mode: "text", Body: "ok"}}
+	kept := dropDelivered(items, delivered)
+	if len(kept) != 3 || !kept[0].Tool.NoSample || kept[1].Tool == nil || kept[1].Tool.NativeID != "c2" || kept[1].Tool.NoSample || kept[2].Tool != nil {
+		t.Fatalf("kept = %+v", kept)
+	}
+	// Ids differ (another agent): match by arguments even when the transcript
+	// pretty-prints them, each delivered command once.
+	delivered = [][]string{toolKeys(*tool("h1", "bash", `{"command":"ls"}`).Tool), toolKeys(*tool("h2", "write", `{"path":"a.txt","contents":"x"}`).Tool)}
+	items = []record.CapturedItem{tool("t1", "Shell", `{ "command": "ls" }`), tool("t2", "Shell", `{"command":"ls"}`), tool("t3", "Write", `{"path": "a.txt", "contents": "x"}`)}
+	kept = dropDelivered(items, delivered)
+	if len(kept) != 1 || kept[0].Tool.NativeID != "t2" {
+		t.Fatalf("kept = %+v", kept)
+	}
+	// Empty arguments never match by arguments; an argv command matches a
+	// string one.
+	delivered = [][]string{toolKeys(*tool("h3", "mcp__x__briefing", `{}`).Tool), toolKeys(*tool("h4", "shell", `{"command":["bash","-lc","cat a"]}`).Tool)}
+	items = []record.CapturedItem{tool("t4", "mcp__y__other", `{}`), tool("t5", "Bash", `{"command":"bash -lc cat a"}`)}
+	kept = dropDelivered(items, delivered)
+	if len(kept) != 1 || kept[0].Tool.NativeID != "t4" {
+		t.Fatalf("kept = %+v", kept)
+	}
+}
+
+func TestShellChangesLandOnTheShellCall(t *testing.T) {
+	root := gitRepo(t)
+	st := enabledStore(t, root)
+	transcript := filepath.Join(t.TempDir(), "s.jsonl")
+	_ = os.WriteFile(transcript, nil, 0o600)
+	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test", nil)}
+	sess := map[string]any{"Session": "s-5", "Transcript": transcript}
+	runHook(t, d, "start", sess)
+	runHook(t, d, "prompt", map[string]any{"Session": "s-5", "Transcript": transcript, "Prompt": "touch a file with the shell"})
+	_ = os.WriteFile(filepath.Join(root, "by-shell.txt"), []byte("x\n"), 0o644)
+	args, _ := json.Marshal(map[string]string{"command": "echo x > by-shell.txt"})
+	runHook(t, d, "tool", map[string]any{"Session": "s-5", "Transcript": transcript,
+		"Tool": &record.Tool{NativeID: "sh1", Name: "Bash", Arguments: args, Status: "completed"}})
+	db := st.DB()
+	var path, callID string
+	if err := db.QueryRow(`SELECT f.path, c.native_call_id FROM file_touch f JOIN tool_call c ON c.id = f.tool_call_id`).Scan(&path, &callID); err != nil || path != "by-shell.txt" || callID != "sh1" {
+		t.Fatalf("touch after the shell hook: %q %q %v", path, callID, err)
+	}
+	f, _ := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	_, _ = f.WriteString(`{"kind":"text","body":"Done."}` + "\n")
+	_ = f.Close()
+	runHook(t, d, "stop", sess)
+	var n int
+	_ = db.QueryRow(`SELECT count(*) FROM tool_call`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("tool calls = %d, want only the shell call (no synthetic changes call)", n)
+	}
+	_ = db.QueryRow(`SELECT count(*) FROM file_touch`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("touches = %d, want 1", n)
+	}
+}
+
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	c := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=T", "-c", "user.email=t@e", "-c", "commit.gpgsign=false"}, args...)...)
+	c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null")
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+}
+
+func TestACommitMadeDuringTheTurnGetsItsCheckpoint(t *testing.T) {
+	for _, perEvent := range []bool{true, false} {
+		root := gitRepo(t)
+		st := enabledStore(t, root)
+		transcript := filepath.Join(t.TempDir(), "s.jsonl")
+		_ = os.WriteFile(transcript, nil, 0o600)
+		d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test", nil)}
+		sess := map[string]any{"Session": "s-c", "Transcript": transcript}
+		runHook(t, d, "start", sess)
+		runHook(t, d, "prompt", map[string]any{"Session": "s-c", "Transcript": transcript, "Prompt": "write and commit"})
+		// One shell command writes the file and commits it; the
+		// post-commit hook would run here and find no touch yet.
+		_ = os.WriteFile(filepath.Join(root, "c2.txt"), []byte("two\n"), 0o644)
+		gitIn(t, root, "add", "c2.txt")
+		gitIn(t, root, "commit", "-q", "-m", "agent commit")
+		if perEvent {
+			args, _ := json.Marshal(map[string]string{"command": "echo two > c2.txt && git add c2.txt && git commit -m 'agent commit'"})
+			runHook(t, d, "tool", map[string]any{"Session": "s-c", "Transcript": transcript,
+				"Tool": &record.Tool{NativeID: "sh", Name: "Bash", Arguments: args, Status: "completed"}})
+		}
+		f, _ := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+		_, _ = f.WriteString(`{"kind":"text","body":"Committed."}` + "\n")
+		_ = f.Close()
+		runHook(t, d, "stop", sess)
+		var files string
+		if err := st.DB().QueryRow(`SELECT files_touched FROM checkpoint`).Scan(&files); err != nil || !strings.Contains(files, "c2.txt") {
+			t.Fatalf("perEvent=%v: checkpoint files = %q %v", perEvent, files, err)
+		}
+		var live int
+		_ = st.DB().QueryRow(`SELECT count(*) FROM file_touch WHERE path = 'c2.txt' AND consumed_by_commit IS NULL`).Scan(&live)
+		if live != 0 {
+			t.Fatalf("perEvent=%v: the late touch must be consumed by the commit it linked to", perEvent)
+		}
+	}
+}
+
+func TestCommittingAFileWrittenBeforeTheTurnGetsItsCheckpoint(t *testing.T) {
+	root := gitRepo(t)
+	st := enabledStore(t, root)
+	transcript := filepath.Join(t.TempDir(), "s.jsonl")
+	_ = os.WriteFile(transcript, nil, 0o600)
+	// greet.js was written earlier (another session, or by hand) and is
+	// untracked when the turn starts; the agent only stages and commits it.
+	_ = os.WriteFile(filepath.Join(root, "greet.js"), []byte("hi\n"), 0o644)
+	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test", nil)}
+	sess := map[string]any{"Session": "s-g", "Transcript": transcript}
+	runHook(t, d, "start", sess)
+	runHook(t, d, "prompt", map[string]any{"Session": "s-g", "Transcript": transcript, "Prompt": "commit greet.js"})
+	shell := func(id, cmd string) {
+		args, _ := json.Marshal(map[string]string{"command": cmd})
+		runHook(t, d, "tool", map[string]any{"Session": "s-g", "Transcript": transcript,
+			"Tool": &record.Tool{NativeID: id, Name: "Bash", Arguments: args, Status: "completed"}})
+	}
+	// The agent reads the file first: a read explains no change.
+	readArgs, _ := json.Marshal(map[string]string{"filePath": filepath.Join(root, "greet.js")})
+	runHook(t, d, "tool", map[string]any{"Session": "s-g", "Transcript": transcript,
+		"Tool": &record.Tool{NativeID: "r", Name: "read", Arguments: readArgs, Locations: []string{filepath.Join(root, "greet.js")}, Status: "completed"}})
+	gitIn(t, root, "add", "greet.js")
+	shell("a", "git add greet.js")
+	gitIn(t, root, "commit", "-q", "-m", "feat: greet")
+	// git's post-commit hook walks the commit before the agent's tool hook
+	// reports the command.
+	if _, err := gitlink.Link(context.Background(), st, root, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	shell("c", `git commit -m "feat: greet"`)
+	f, _ := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	_, _ = f.WriteString(`{"kind":"text","body":"Committed."}` + "\n")
+	_ = f.Close()
+	runHook(t, d, "stop", sess)
+	var files string
+	if err := st.DB().QueryRow(`SELECT files_touched FROM checkpoint`).Scan(&files); err != nil || !strings.Contains(files, "greet.js") {
+		t.Fatalf("checkpoint files = %q %v", files, err)
 	}
 }

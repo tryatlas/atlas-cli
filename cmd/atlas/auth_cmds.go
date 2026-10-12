@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tryatlas/atlas-cli/internal/auth"
+	"github.com/tryatlas/atlas-cli/internal/tui"
 )
 
 // newAuth is replaced in tests.
@@ -26,6 +27,29 @@ func runLogin(cmd *cobra.Command, _ []string) error {
 	}
 	noBrowser, _ := cmd.Flags().GetBool("no-browser")
 	out := cmd.OutOrStdout()
+	if interactive() {
+		var s *auth.Session
+		err := tui.DeviceLogin(func(prompt func(tui.DevicePrompt)) (string, error) {
+			var err error
+			s, err = a.Login(cmd.Context(), func(p auth.Prompt) {
+				opened := !noBrowser && canOpenBrowser() && openBrowser(p.VerificationURI) == nil
+				prompt(tui.DevicePrompt{URL: p.VerificationURI, Code: p.UserCode, Expires: p.ExpiresAt, Opened: opened})
+			})
+			if err != nil {
+				return "", err
+			}
+			if s.Identity != nil {
+				return fmt.Sprintf("%s <%s>", s.Identity.Name, s.Identity.Email), nil
+			}
+			return "you", nil
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out)
+		printIdentity(out, s, a.Store.Path())
+		return nil
+	}
 	s, err := a.Login(cmd.Context(), func(p auth.Prompt) {
 		fmt.Fprintf(out, "To sign in, open %s and enter the code:\n\n    %s\n\n", p.VerificationURI, p.UserCode)
 		if !noBrowser && canOpenBrowser() {
@@ -48,20 +72,18 @@ func runLogout(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	confirmed, err := a.Logout(cmd.Context())
-	if errors.Is(err, auth.ErrSignedOut) {
-		fmt.Fprintln(cmd.OutOrStdout(), "Not signed in.")
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if confirmed {
-		fmt.Fprintln(cmd.OutOrStdout(), "Signed out.")
-	} else {
-		fmt.Fprintln(cmd.OutOrStdout(), "Signed out on this machine. Atlas did not confirm the server session ended; it expires on its own.")
-	}
-	return nil
+	return tui.Work(cmd.OutOrStdout(), "Signing out", func(tui.StepFunc) (string, error) {
+		confirmed, err := a.Logout(cmd.Context())
+		switch {
+		case errors.Is(err, auth.ErrSignedOut):
+			return "Not signed in.", nil
+		case err != nil:
+			return "", err
+		case confirmed:
+			return "Signed out.", nil
+		}
+		return "Signed out on this machine. Atlas did not confirm the server session ended; it expires on its own.", nil
+	})
 }
 
 func runWhoami(cmd *cobra.Command, _ []string) error {
@@ -75,7 +97,12 @@ func runWhoami(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if refresh {
-		r, rerr := a.Refresh(cmd.Context())
+		var r *auth.Session
+		var rerr error
+		_ = tui.Work(io.Discard, "Refreshing your profile", func(tui.StepFunc) (string, error) {
+			r, rerr = a.Refresh(cmd.Context())
+			return "", nil
+		})
 		if errors.Is(rerr, auth.ErrSignedOut) {
 			return rerr
 		}
@@ -95,7 +122,11 @@ func runOrgList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	s, err := a.Refresh(cmd.Context())
+	var s *auth.Session
+	_ = tui.Work(io.Discard, "Fetching your organisations", func(tui.StepFunc) (string, error) {
+		s, err = a.Refresh(cmd.Context())
+		return "", nil
+	})
 	if errors.Is(err, auth.ErrSignedOut) {
 		return err
 	}
@@ -124,13 +155,13 @@ func runOrgUse(cmd *cobra.Command, args []string) error {
 	}
 	out := cmd.OutOrStdout()
 	if id == "" {
-		fmt.Fprintln(out, "No organisation pinned.")
+		tui.Done(out, "No organisation pinned.")
 		return nil
 	}
 	if s.ActiveOrgID() != id {
 		fmt.Fprintf(cmd.ErrOrStderr(), "atlas: %s is not in your organisation list; pinned anyway. Run atlas org list to refresh it.\n", id)
 	}
-	fmt.Fprintf(out, "Active organisation: %s\n", orgLabel(s, id))
+	tui.Done(out, "Active organisation: "+orgLabel(s, id))
 	return nil
 }
 
@@ -152,26 +183,30 @@ func runOrgCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot make a handle from %q; pass --slug", name)
 	}
 	ctx := cmd.Context()
-	free, err := a.Client.CheckSlug(ctx, s.SessionToken, slug)
-	if err != nil {
-		return err
-	}
-	if !free {
-		return fmt.Errorf("the handle %q is taken; pass another with --slug", slug)
-	}
-	created, err := a.Client.CreateOrg(ctx, s.SessionToken, name, slug)
-	if err != nil {
-		var f *auth.Failure
-		if errors.As(err, &f) && f.Kind == auth.Denied {
-			return errors.New("couldn't create it: that organisation name or handle may already be taken")
+	return tui.Work(cmd.OutOrStdout(), "Creating "+name, func(step tui.StepFunc) (string, error) {
+		step("checking the handle " + slug)
+		free, err := a.Client.CheckSlug(ctx, s.SessionToken, slug)
+		if err != nil {
+			return "", err
 		}
-		return err
-	}
-	if _, err := a.Refresh(ctx); err != nil && !errors.Is(err, auth.ErrSignedOut) {
-		fmt.Fprintln(cmd.ErrOrStderr(), "atlas: created, but could not refresh the list:", err)
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Created %s (%s). Run atlas org use %s to make it active.\n", created.Name, created.ID, created.ID)
-	return nil
+		if !free {
+			return "", fmt.Errorf("the handle %q is taken; pass another with --slug", slug)
+		}
+		step("creating the organisation")
+		created, err := a.Client.CreateOrg(ctx, s.SessionToken, name, slug)
+		if err != nil {
+			var f *auth.Failure
+			if errors.As(err, &f) && f.Kind == auth.Denied {
+				return "", errors.New("couldn't create it: that organisation name or handle may already be taken")
+			}
+			return "", err
+		}
+		step("refreshing your organisations")
+		if _, err := a.Refresh(ctx); err != nil && !errors.Is(err, auth.ErrSignedOut) {
+			fmt.Fprintln(cmd.ErrOrStderr(), "atlas: created, but could not refresh the list:", err)
+		}
+		return fmt.Sprintf("Created %s (%s). Run atlas org use %s to make it active.", created.Name, created.ID, created.ID), nil
+	})
 }
 
 var slugJunk = regexp.MustCompile(`[^a-z0-9]+`)
@@ -182,6 +217,21 @@ func slugify(name string) string {
 
 func printIdentity(w io.Writer, s *auth.Session, path string) {
 	if s == nil {
+		return
+	}
+	if interactive() {
+		tui.Header(w, "account")
+		tui.Section(w, "Signed in")
+		if id := s.Identity; id != nil {
+			tui.Field(w, "Name", tui.Default.Bold.Render(id.Name))
+			tui.Field(w, "Email", id.Email)
+			tui.Field(w, "User id", tui.Default.Faint.Render(id.ID))
+		} else {
+			tui.Field(w, "Profile", "not fetched yet (atlas whoami --refresh)")
+		}
+		printOrgs(w, s)
+		tui.Section(w, "On this machine")
+		tui.Field(w, "Session file", tui.Default.Faint.Render(path))
 		return
 	}
 	if id := s.Identity; id != nil {
@@ -195,6 +245,23 @@ func printIdentity(w io.Writer, s *auth.Session, path string) {
 
 func printOrgs(w io.Writer, s *auth.Session) {
 	id := s.Identity
+	if interactive() && id != nil && id.Orgs != nil && len(*id.Orgs) > 0 {
+		tui.Section(w, "Organisations")
+		var rows [][]string
+		for _, o := range *id.Orgs {
+			role := ""
+			if o.Role != nil {
+				role = string(*o.Role)
+			}
+			state := tui.Default.Off.Render("○")
+			if o.ID == s.ActiveOrgID() {
+				state = tui.Default.Success.Render("●") + " active"
+			}
+			rows = append(rows, []string{o.Name, tui.Default.Faint.Render(o.ID), role, state})
+		}
+		fmt.Fprint(w, tui.Table([]string{"name", "id", "role", ""}, rows))
+		return
+	}
 	switch {
 	case id == nil || id.Orgs == nil:
 		fmt.Fprintln(w, "Organisations: not known yet")

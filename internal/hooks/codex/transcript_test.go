@@ -302,6 +302,8 @@ func TestReadCodeMode(t *testing.T) {
 		`{"timestamp":"2026-10-12T02:39:28.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_Sn9","output":[{"type":"input_text","text":"Script completed\nWall time 0.6 seconds\nOutput:\n"},{"type":"input_text","text":"{}"}]}}`,
 		`{"timestamp":"2026-10-12T02:39:29.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_mix","name":"exec","input":"await tools.shell({command: 'go test'}); await tools.apply_patch(\"*** Begin Patch\\n*** Update File: a.go\\n*** End Patch\");"}}`,
 		`{"timestamp":"2026-10-12T02:39:30.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_mix","output":"ok"}}`,
+		`{"timestamp":"2026-10-12T02:39:31.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_cmd","name":"exec","input":"const r = await tools.exec_command({\"cmd\":\"cat rt.txt\",\"workdir\":\"/private/tmp/hooks-codex\",\"yield_time_ms\":10000,\"max_output_tokens\":2000});\ntext(r.output);\n"}}`,
+		`{"timestamp":"2026-10-12T02:39:32.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_cmd","output":[{"type":"input_text","text":"Script completed\nWall time 0.2 seconds\nOutput:\n"},{"type":"input_text","text":"realtime\n"}]}}`,
 	}
 	p := filepath.Join(t.TempDir(), "rollout.jsonl")
 	if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
@@ -311,7 +313,7 @@ func TestReadCodeMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(turn.Items) != 3 {
+	if len(turn.Items) != 4 {
 		t.Fatalf("items %d: %+v", len(turn.Items), turn.Items)
 	}
 	// A script that only edits is the edit, with the script's output.
@@ -332,5 +334,14 @@ func TestReadCodeMode(t *testing.T) {
 	}
 	if ed == nil || ed.Name != "apply_patch" || ed.NativeID != "call_mix#patch1" || len(ed.Locations) != 1 || ed.Locations[0] != "a.go" || ed.Result != nil {
 		t.Fatalf("patch %+v", ed)
+	}
+	// A script that only runs one command is that command, with cmd at the
+	// top level (the hook reports the same text as command) and the output.
+	cmd := turn.Items[3].Tool
+	if cmd == nil || cmd.Name != "exec_command" || cmd.NativeID != "call_cmd" || !strings.Contains(string(cmd.Arguments), `"cmd":"cat rt.txt"`) || cmd.Result == nil || !strings.HasSuffix(*cmd.Result, "realtime\n") {
+		t.Fatalf("command %+v", cmd)
+	}
+	if record.CanonicalToolName(cmd.Name, "", "", cmd.Arguments) != "Bash" {
+		t.Fatal("exec_command should canonicalise to Bash")
 	}
 }

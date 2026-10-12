@@ -55,7 +55,7 @@ Run them before tagging. Record the results in `docs/progress.md`.
 | 4 | `atlas agents list` | The eight agents; hook and memory "absent"; binaries on PATH named |
 | 5 | `atlas agents add claude-code` | "hook installed, memory server added to .mcp.json"; the git post-commit hook installed; `.claude/settings.local.json` holds six Atlas hooks |
 | 6 | `claude -p "Create hello.md with one line"` | The reply; `hello.md` exists; `atlas status` shows 1 session; `atlas agents sessions` lists it with `claude -r <id>` |
-| 7 | `claude` (its own UI): a prompt that edits a file, then exit | The SessionStart banner "Atlas: capture on · memory on · …"; a second turn in the store with the tool call and the file touch |
+| 7 | `claude` (its own UI): a prompt that edits a file and runs a command, then exit | The SessionStart banner "Atlas: capture on · memory on · …"; while the agent still works, `sqlite3 .atlas/sessions.db "select tool_name from tool_call"` already lists the calls (per-event); after Stop one completed turn with the prompt first, one row per call, the reply last, no `changes-N` call |
 | 8 | `atlas memory list` | `file_changed` entries from both turns |
 | 9 | Commit the file | The post-commit hook links it: `atlas status` says "Commits: linked up to <sha>" without running `atlas capture link` |
 | 10 | `git commit --amend -m reworded`, then `atlas capture link` | "Rewritten history: 1 relinked" |

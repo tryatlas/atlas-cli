@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/tryatlas/atlas-cli/internal/tui"
 )
 
 // version is set at build time with -ldflags "-X main.version=…".
@@ -24,6 +26,10 @@ func main() {
 
 // run executes the command tree and returns the process exit code.
 func run(args []string, stdout, stderr io.Writer) int {
+	if interactive() {
+		tui.Detect() // light or dark palette, before anything draws
+		stdout = tui.Out(stdout)
+	}
 	root := newRootCmd()
 	root.SetArgs(args)
 	root.SetIn(stdin)
@@ -37,7 +43,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 2
 		}
-		fmt.Fprintln(stderr, "atlas:", err)
+		if !errors.Is(err, tui.ErrCancelled) && !tui.Shown(err) { // the screen already said so
+			fmt.Fprintln(stderr, "atlas:", err)
+		}
 		return 1
 	}
 	return 0

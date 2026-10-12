@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite with FTS5
 )
@@ -93,7 +95,39 @@ const (
 type Store struct {
 	ScopeRoot string
 	db        *sql.DB
+	opened    os.FileInfo // memory.sqlite as opened
+	held      *os.File    // a handle on it: unlinked means .atlas/ went away
 }
+
+// Stale reports that memory.sqlite on disk is no longer the file this store
+// opened (.atlas/ deleted or re-created): a long-lived holder (the listener,
+// an mcp-bridge) must reopen it, or its writes go to a file no one sees.
+func (s *Store) Stale() bool {
+	now, err := os.Stat(Path(s.ScopeRoot))
+	return err != nil || s.opened == nil || unlinked(s.held) || !os.SameFile(s.opened, now)
+}
+
+// unlinked: the open file's link count is 0. A re-created file can reuse
+// the inode number (ext4 does), so the inode comparison alone misses it.
+func unlinked(f *os.File) bool {
+	if f == nil {
+		return false
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return true
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	return ok && st.Nlink == 0
+}
+
+// File names in <scope>/.atlas/memory/, as the desktop names them.
+const (
+	DBFile       = "memory.sqlite"
+	SnapshotFile = "memory.snapshot.sqlite"
+	// SnapshotEvery is how old the snapshot may get (health.rs SNAPSHOT_EVERY_MS).
+	SnapshotEvery = 24 * time.Hour
+)
 
 // Path is <scope root>/.atlas/memory/memory.sqlite.
 func Path(scopeRoot string) string {
@@ -104,6 +138,58 @@ func Path(scopeRoot string) string {
 // created at schema v6. A record below v6 was made by an older desktop and is
 // refused rather than overwritten.
 func Open(scopeRoot string, create bool) (*Store, error) {
+	st, err := openChecked(scopeRoot, create)
+	if err == nil || !damaged(err) {
+		return st, err
+	}
+	// A damaged record is quarantined and the last snapshot copied in its
+	// place, with a restored.json marker for the app, as the desktop does
+	// (crates/atlas-memory/src/record.rs RecordStore::open).
+	if qerr := quarantine(scopeRoot, time.Now().UnixMilli()); qerr != nil {
+		return nil, fmt.Errorf("%w (and quarantining it failed: %w)", err, qerr)
+	}
+	return openChecked(scopeRoot, create)
+}
+
+// damaged tells a damaged file from a record the CLI declines (wrong schema
+// version, not there).
+func damaged(err error) bool {
+	if errors.Is(err, ErrNoRecord) || errors.Is(err, ErrSchemaTooNew) || errors.Is(err, ErrSchemaTooOld) {
+		return false
+	}
+	m := strings.ToLower(err.Error())
+	for _, w := range []string{"malformed", "not a database", "quick_check", "corrupt", "disk image"} {
+		if strings.Contains(m, w) {
+			return true
+		}
+	}
+	return false
+}
+
+func quarantine(scopeRoot string, now int64) error {
+	dir := filepath.Dir(Path(scopeRoot))
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		from := filepath.Join(dir, DBFile+suffix)
+		if _, err := os.Stat(from); err == nil {
+			if err := os.Rename(from, filepath.Join(dir, fmt.Sprintf("%s%s.corrupt-%d", DBFile, suffix, now))); err != nil {
+				return err
+			}
+		}
+	}
+	fromSnapshot := copyFile(filepath.Join(dir, SnapshotFile), filepath.Join(dir, DBFile)) == nil
+	b, _ := json.Marshal(map[string]any{"at": now, "from_snapshot": fromSnapshot})
+	return os.WriteFile(filepath.Join(dir, "restored.json"), b, 0o644) //nolint:gosec // G306: a marker the app reads
+}
+
+func copyFile(from, to string) error {
+	b, err := os.ReadFile(from) //nolint:gosec // G304: the record's own snapshot
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(to, b, 0o644) //nolint:gosec // G306: the record, as the app writes it
+}
+
+func openChecked(scopeRoot string, create bool) (*Store, error) {
 	path := Path(scopeRoot)
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		if !create {
@@ -124,6 +210,16 @@ func Open(scopeRoot string, create bool) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	var quick string
+	if err := db.QueryRow(`PRAGMA quick_check`).Scan(&quick); err != nil || quick != "ok" {
+		_ = db.Close()
+		if err == nil {
+			err = fmt.Errorf("quick_check: %s", quick)
+		}
+		return nil, err
+	}
+	s.opened, _ = os.Stat(path)
+	s.held, _ = os.Open(path) //nolint:gosec // G304: the record's own file
 	return s, nil
 }
 
@@ -162,7 +258,12 @@ func (s *Store) migrate() error {
 }
 
 // Close closes the record.
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	if s.held != nil {
+		_ = s.held.Close()
+	}
+	return s.db.Close()
+}
 
 // VerifyChain recomputes the revision hash chain.
 func (s *Store) VerifyChain() (ChainReport, error) { return verifyChain(s.db) }

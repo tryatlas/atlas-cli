@@ -3,11 +3,13 @@
 package claude
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 
+	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/hooks"
 )
 
@@ -27,6 +29,7 @@ const (
 	VerbStopFailure  = "stop-failure"
 	VerbPreCompact   = "pre-compact"
 	VerbSessionEnd   = "session-end"
+	VerbPostToolUse  = "post-tool-use"
 )
 
 // ID is the registry key.
@@ -40,7 +43,7 @@ func (Agent) Binary() string { return "claude" }
 
 // Verbs are the hook verbs the installed config invokes.
 func (Agent) Verbs() []string {
-	return []string{VerbSessionStart, VerbPromptSubmit, VerbStop, VerbStopFailure, VerbPreCompact, VerbSessionEnd}
+	return []string{VerbSessionStart, VerbPromptSubmit, VerbPostToolUse, VerbStop, VerbStopFailure, VerbPreCompact, VerbSessionEnd}
 }
 
 // SettingsPath is the local (per-machine, uncommitted) Claude settings
@@ -53,6 +56,7 @@ func (a Agent) shaped(root string) hooks.ClaudeShaped {
 	return hooks.ClaudeShaped{Path: SettingsPath(root), Types: []hooks.ClaudeHook{
 		{Type: "SessionStart", Command: hooks.WrapWithMessage(hooks.Command(ID, VerbSessionStart), hooks.MissingMessage)},
 		{Type: "UserPromptSubmit", Command: hooks.Wrap(hooks.Command(ID, VerbPromptSubmit))},
+		{Type: "PostToolUse", Command: hooks.Wrap(hooks.Command(ID, VerbPostToolUse))},
 		{Type: "Stop", Command: hooks.Wrap(hooks.Command(ID, VerbStop))},
 		{Type: "StopFailure", Command: hooks.Wrap(hooks.Command(ID, VerbStopFailure))},
 		{Type: "PreCompact", Command: hooks.Wrap(hooks.Command(ID, VerbPreCompact))},
@@ -95,12 +99,33 @@ func (Agent) ResumeCommand(id string) string { return "claude -r " + id }
 
 // payload is the common shape of Claude Code hook input.
 type payload struct {
-	SessionID      string `json:"session_id"`
-	TranscriptPath string `json:"transcript_path"`
-	Cwd            string `json:"cwd"`
-	Model          string `json:"model"`
-	Prompt         string `json:"prompt"`
-	Source         string `json:"source"`
+	SessionID      string          `json:"session_id"`
+	TranscriptPath string          `json:"transcript_path"`
+	Cwd            string          `json:"cwd"`
+	Model          string          `json:"model"`
+	Prompt         string          `json:"prompt"`
+	Source         string          `json:"source"`
+	ToolName       string          `json:"tool_name"`
+	ToolUseID      string          `json:"tool_use_id"`
+	ToolInput      json.RawMessage `json:"tool_input"`
+	ToolResponse   json.RawMessage `json:"tool_response"`
+}
+
+// toolOf is the completed call a PostToolUse payload describes. The
+// response is a string or an object; either is kept as text.
+func (p payload) toolOf() *record.Tool {
+	if p.ToolUseID == "" || p.ToolName == "" {
+		return nil
+	}
+	t := &record.Tool{NativeID: p.ToolUseID, Name: p.ToolName, Arguments: p.ToolInput, Status: "completed"}
+	if r := bytes.TrimSpace(p.ToolResponse); len(r) > 0 && string(r) != "null" {
+		var str string
+		if json.Unmarshal(r, &str) != nil {
+			str = string(r)
+		}
+		t.Result = &str
+	}
+	return t
 }
 
 // Parse maps a hook verb and payload to an event.
@@ -123,6 +148,12 @@ func (Agent) Parse(verb string, raw []byte) (*hooks.Event, error) {
 	case VerbStopFailure:
 		ev.Kind = hooks.TurnEnd
 		ev.TurnEndFailed = true
+	case VerbPostToolUse:
+		ev.Kind = hooks.ToolUse
+		ev.Tool = p.toolOf()
+		if ev.Tool == nil {
+			return nil, nil
+		}
 	case VerbPreCompact:
 		ev.Kind = hooks.Compaction
 	case VerbSessionEnd:

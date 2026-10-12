@@ -74,7 +74,7 @@ func Link(ctx context.Context, st *store.Store, root string, now func() time.Tim
 		return res, err
 	}
 	for _, sha := range strings.Fields(list) {
-		n, err := evaluate(ctx, g, st, sha, touches, now)
+		n, err := evaluate(ctx, g, st, sha, touches, now, false)
 		if err != nil {
 			return res, err
 		}
@@ -99,8 +99,9 @@ type commit struct {
 }
 
 // evaluate links one first-parent commit; a merge creates no checkpoint and
-// its side commits are evaluated instead.
-func evaluate(ctx context.Context, g runner, st *store.Store, sha string, touches []store.Touch, now func() time.Time) (int, error) {
+// its side commits are evaluated instead. late says the touches may have been
+// recorded after the commit (LinkRange): they are consumed all the same.
+func evaluate(ctx context.Context, g runner, st *store.Store, sha string, touches []store.Touch, now func() time.Time, late bool) (int, error) {
 	c, err := g.commit(ctx, sha)
 	if err != nil {
 		return 0, err
@@ -112,7 +113,7 @@ func evaluate(ctx context.Context, g runner, st *store.Store, sha string, touche
 		}
 		total := 0
 		for _, s := range strings.Fields(side) {
-			n, err := evaluate(ctx, g, st, s, touches, now)
+			n, err := evaluate(ctx, g, st, s, touches, now, late)
 			if err != nil {
 				return total, err
 			}
@@ -161,8 +162,12 @@ func evaluate(ctx context.Context, g runner, st *store.Store, sha string, touche
 		if err := st.UpsertCheckpoint(ctx, cp, now()); err != nil {
 			return written, err
 		}
+		cutoff := c.time
+		if late {
+			cutoff = now()
+		}
 		for _, p := range touchPaths {
-			if err := st.ConsumeTouches(ctx, sid, p, sha, c.time); err != nil {
+			if err := st.ConsumeTouches(ctx, sid, p, sha, cutoff); err != nil {
 				return written, err
 			}
 		}
@@ -355,4 +360,38 @@ func (g runner) branch(ctx context.Context) *string {
 		return nil
 	}
 	return &b
+}
+
+// LinkRange links the first-parent commits after from up to HEAD to the
+// touches recorded so far, whatever the cursor says: an agent hook calls it
+// when touches arrive after a commit the post-commit hook already walked (a
+// file written and committed in one shell command, or a turn delivered at
+// its end). Checkpoints are upserted, so a commit linked twice stays one.
+func LinkRange(ctx context.Context, st *store.Store, root, from string, now func() time.Time) (int, error) {
+	g := runner{dir: root}
+	if from == "" || !g.isCommit(ctx, from) || g.midOperation(ctx) {
+		return 0, nil
+	}
+	list, err := g.out(ctx, "rev-list", "--first-parent", "--reverse", "--max-count", strconv.Itoa(scanLimit), from+"..HEAD")
+	if err != nil || list == "" {
+		return 0, err
+	}
+	touches, err := st.LiveTouches(ctx, root)
+	if err != nil || len(touches) == 0 {
+		return 0, err
+	}
+	total := 0
+	for _, sha := range strings.Fields(list) {
+		n, err := evaluate(ctx, g, st, sha, touches, now, true)
+		if err != nil {
+			return total, err
+		}
+		total += n
+		if n > 0 {
+			if touches, err = st.LiveTouches(ctx, root); err != nil {
+				return total, err
+			}
+		}
+	}
+	return total, nil
 }

@@ -183,20 +183,24 @@ func FTSQuery(q string) string {
 // Hit is a search result with its BM25 rank (1-based; 0 when not from BM25).
 type Hit struct {
 	Entry *Entry
-	BM25  int
+	BM25  int // 1-based rank in the keyword leg; 0 when it did not find it
+	Dense int // 1-based rank in the meaning leg
 }
 
 // rrfK is the reciprocal-rank-fusion constant.
 const rrfK = 60
 
-// Search ranks entries: the BM25 leg (depth 100) fused with two priors that
-// only reorder what was found — trust (active before candidate, then
-// confidence, then id; weight 0.5) and recency (weight 0.3). Archived entries
-// are excluded. An empty query returns the newest entries.
+// Search is the app's hybrid search (record.rs search_explained): the
+// keyword leg (FTS5 BM25, 100 deep) and the meaning leg (cosine over cached
+// vectors, 100 deep, at least 0.35) fused by reciprocal rank (k 60, weight 1
+// each), then priors that only reorder what was found: trust (active before
+// candidate, then confidence, then id; weight 0.5) and recency (the later of
+// last use and update; weight 0.3). Archived entries are excluded. Without a
+// model the meaning leg is empty. An empty query returns the newest entries.
 func (s *Store) Search(ctx context.Context, query string, kinds []string, limit int) ([]Hit, error) {
 	kq, kargs := kindFilter(kinds)
 	fq := FTSQuery(query)
-	if fq == "" {
+	if strings.TrimSpace(query) == "" {
 		es, err := s.queryEntries(ctx, `WHERE state <> 'archived'`+kq+` ORDER BY updated_at DESC, id DESC LIMIT ?`, append(kargs, limit)...)
 		hits := make([]Hit, len(es))
 		for i, e := range es {
@@ -204,20 +208,41 @@ func (s *Store) Search(ctx context.Context, query string, kinds []string, limit 
 		}
 		return hits, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT rowid FROM entries_fts WHERE entries_fts MATCH ? ORDER BY rank LIMIT 100`, fq)
-	if err != nil {
-		return nil, err
-	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
+	var bmIDs []int64
+	if fq != "" {
+		rows, err := s.db.QueryContext(ctx, `SELECT rowid FROM entries_fts WHERE entries_fts MATCH ? ORDER BY rank LIMIT ?`, fq, legDepth)
+		if err != nil {
 			return nil, err
 		}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			bmIDs = append(bmIDs, id)
+		}
+		_ = rows.Close()
+	}
+	var denseIDs []int64
+	if v := vectorFor(ctx, s.db, strings.TrimSpace(query)); v != nil {
+		var err error
+		if denseIDs, err = s.denseIDs(ctx, v); err != nil {
+			return nil, err
+		}
+	}
+	bm, dn := map[int64]int{}, map[int64]int{}
+	var ids []int64
+	for i, id := range bmIDs {
+		bm[id] = i + 1
 		ids = append(ids, id)
 	}
-	_ = rows.Close()
+	for i, id := range denseIDs {
+		dn[id] = i + 1
+		if bm[id] == 0 {
+			ids = append(ids, id)
+		}
+	}
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -230,19 +255,20 @@ func (s *Store) Search(ctx context.Context, query string, kinds []string, limit 
 	if err != nil {
 		return nil, err
 	}
-	bm := map[int64]int{}
-	for i, id := range ids {
-		bm[id] = i + 1
-	}
 	score := map[int64]float64{}
 	for _, e := range found {
-		score[e.ID] += 1.0 / float64(rrfK+bm[e.ID])
+		if r := bm[e.ID]; r > 0 {
+			score[e.ID] += 1.0 / float64(rrfK+r)
+		}
+		if r := dn[e.ID]; r > 0 {
+			score[e.ID] += 1.0 / float64(rrfK+r)
+		}
 	}
 	trust := append([]*Entry(nil), found...)
 	sort.SliceStable(trust, func(i, j int) bool {
 		a, b := trust[i], trust[j]
-		if (a.State == StateActive) != (b.State == StateActive) {
-			return a.State == StateActive
+		if (a.State == StateCandidate) != (b.State == StateCandidate) {
+			return b.State == StateCandidate
 		}
 		if a.Confidence != b.Confidence {
 			return a.Confidence > b.Confidence
@@ -252,8 +278,20 @@ func (s *Store) Search(ctx context.Context, query string, kinds []string, limit 
 	for i, e := range trust {
 		score[e.ID] += 0.5 / float64(rrfK+i+1)
 	}
+	lastTouch := func(e *Entry) int64 {
+		t := e.UpdatedAt
+		if e.LastUsedAt != nil && *e.LastUsedAt > t {
+			t = *e.LastUsedAt
+		}
+		return t
+	}
 	recent := append([]*Entry(nil), found...)
-	sort.SliceStable(recent, func(i, j int) bool { return recent[i].UpdatedAt > recent[j].UpdatedAt })
+	sort.SliceStable(recent, func(i, j int) bool {
+		if lastTouch(recent[i]) != lastTouch(recent[j]) {
+			return lastTouch(recent[i]) > lastTouch(recent[j])
+		}
+		return recent[i].ID < recent[j].ID
+	})
 	for i, e := range recent {
 		score[e.ID] += 0.3 / float64(rrfK+i+1)
 	}
@@ -263,9 +301,12 @@ func (s *Store) Search(ctx context.Context, query string, kinds []string, limit 
 		}
 		return found[i].ID < found[j].ID
 	})
+	if limit > 0 && len(found) > limit {
+		found = found[:limit]
+	}
 	hits := make([]Hit, len(found))
 	for i, e := range found {
-		hits[i] = Hit{Entry: e, BM25: bm[e.ID]}
+		hits[i] = Hit{Entry: e, BM25: bm[e.ID], Dense: dn[e.ID]}
 	}
 	return hits, nil
 }

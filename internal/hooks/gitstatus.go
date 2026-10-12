@@ -76,3 +76,39 @@ func relPath(root, p string) string {
 	}
 	return p
 }
+
+// gitHead is HEAD's commit, or "" (unborn, not a repository).
+func gitHead(ctx context.Context, root string) string {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "-q", "--verify", "HEAD") //nolint:gosec // G204: fixed read-only git subcommand
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "LC_ALL=C")
+	b, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// committedSince are the paths changed by the commits from..HEAD: files the
+// turn committed, which git status no longer shows.
+func committedSince(ctx context.Context, root, from string) []string {
+	if from == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "diff", "--name-only", "-z", "--no-renames", from, "HEAD") //nolint:gosec // G204: fixed read-only git subcommand
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "LC_ALL=C")
+	b, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(string(b), "\x00") {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}

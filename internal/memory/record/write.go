@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/tryatlas/atlas-cli/internal/embed"
 )
 
 // Revision ops.
@@ -85,6 +87,12 @@ func (s *Store) Remember(ctx context.Context, w Write) (string, *Entry, error) {
 		return "", nil, errors.New("nothing to remember: content is empty")
 	}
 	hash := ContentHash(w.Content)
+	// A durable write is embedded before the transaction (as the app does,
+	// outside its lock); without a model it is stored all the same.
+	var vec []float32
+	if IsDurable(w.Kind) {
+		vec = vectorFor(ctx, s.db, strings.TrimSpace(w.Content))
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -106,6 +114,15 @@ func (s *Store) Remember(ctx context.Context, w Write) (string, *Entry, error) {
 	if err != nil {
 		return "", nil, err
 	}
+	nearDup := false
+	if cur == nil && vec != nil && !w.OnlyNew {
+		// No key or text match: a stored memory of the kind that says the
+		// same thing takes the write as a merge.
+		if cur, err = nearDuplicate(ctx, tx, w, vec); err != nil {
+			return "", nil, err
+		}
+		nearDup = cur != nil
+	}
 
 	var outcome string
 	var id int64
@@ -125,7 +142,7 @@ func (s *Store) Remember(ctx context.Context, w Write) (string, *Entry, error) {
 	case w.OnlyNew:
 		return "", cur, nil
 
-	case cur.ContentHash == hash:
+	case cur.ContentHash == hash || nearDup:
 		if isRetry(cur, w) {
 			return Merged, cur, nil
 		}
@@ -163,6 +180,11 @@ func (s *Store) Remember(ctx context.Context, w Write) (string, *Entry, error) {
 			return "", nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE entries SET seq = ? WHERE id = ?`, seq, id); err != nil {
+			return "", nil, err
+		}
+	}
+	if vec != nil && (outcome == Inserted || outcome == Replaced) {
+		if err := putVector(ctx, tx, w.Content, vec); err != nil {
 			return "", nil, err
 		}
 	}
@@ -424,7 +446,47 @@ func (s *Store) Forget(ctx context.Context, id int64, session string, at int64) 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM entries WHERE id = ?`, e.ID); err != nil {
 		return false, err
 	}
+	// Its vectors go too, for every text it ever had (record.rs purge).
+	if err := dropVectors(ctx, tx, e); err != nil {
+		return false, err
+	}
 	return true, tx.Commit()
+}
+
+// dropVectors deletes the cached vectors of an entry's current and earlier
+// texts, under every model the cache holds.
+func dropVectors(ctx context.Context, tx *sql.Tx, e *Entry) error {
+	texts := map[string]bool{e.Content: true}
+	rows, err := tx.QueryContext(ctx, `SELECT content FROM revisions WHERE entry_id = ?`, e.ID)
+	if err == nil {
+		for rows.Next() {
+			var c string
+			if rows.Scan(&c) == nil {
+				texts[c] = true
+			}
+		}
+		_ = rows.Close()
+	}
+	mrows, err := tx.QueryContext(ctx, `SELECT DISTINCT model FROM embed_cache`)
+	if err != nil {
+		return err
+	}
+	var models []string
+	for mrows.Next() {
+		var m string
+		if mrows.Scan(&m) == nil {
+			models = append(models, m)
+		}
+	}
+	_ = mrows.Close()
+	for _, m := range models {
+		for t := range texts {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM embed_cache WHERE key = ?`, embed.CacheKey(m, t)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // carryingEvents are the entry's own event and the events of its kind with

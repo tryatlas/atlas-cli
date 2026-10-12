@@ -10,18 +10,22 @@ import (
 	"sort"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	"golang.org/x/sys/unix"
+
+	"github.com/tryatlas/atlas-cli/internal/capture/record"
+	"github.com/tryatlas/atlas-cli/internal/clistate"
 )
 
-// Session state lives under <root>/.atlas/hooks/<agent>/<session id>.json:
-// what the dispatcher needs between two hook invocations of one session.
-// .atlas/ ignores itself in git.
+// Session state lives in the CLI's own state directory (clistate), under
+// hooks/<agent>/<session id>.json: what the dispatcher needs between two hook
+// invocations of one session. Nothing of it goes into <root>/.atlas/, which
+// holds only what the desktop app writes.
 
 // Dir is the hooks state directory of a Project.
-func Dir(root string) string { return filepath.Join(root, store.DirName, "hooks") }
+func Dir(root string) string { return clistate.Path(root, "hooks") }
 
 // LogPath is where hook errors go.
-func LogPath(root string) string { return filepath.Join(root, store.DirName, "cli-hooks.log") }
+func LogPath(root string) string { return clistate.Path(root, "hooks.log") }
 
 // State is one native session as the hooks have seen it.
 type State struct {
@@ -33,17 +37,40 @@ type State struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 	// Turn is the number of turns delivered so far.
 	Turn int `json:"turn"`
+	// Tasks is the session's task list as an agent with incremental task
+	// tools (Claude Code's TaskCreate / TaskUpdate) built it.
+	Tasks []PlanTask `json:"tasks,omitempty"`
+	// TaskCalls are the task tool calls already applied (by call id), so a
+	// call seen by its hook and again in the transcript counts once.
+	TaskCalls []string `json:"task_calls,omitempty"`
 	// InTurn is set between TurnStart and TurnEnd.
 	InTurn bool `json:"in_turn,omitempty"`
 	// Offset is the transcript position at the last turn boundary.
 	Offset int `json:"offset"`
 	// Prompt is the typed prompt of the open turn.
 	Prompt string `json:"prompt,omitempty"`
+	// Head is HEAD at the baseline (turn start, then each shell call):
+	// commits after it were made during the turn.
+	Head string `json:"head,omitempty"`
+	// TurnHead is HEAD when the turn started: commits after it are linked
+	// once the turn's touches have landed.
+	TurnHead string `json:"turn_head,omitempty"`
 	// Status is git status at turn start: path → true; nil when no snapshot
 	// was taken (an empty map is a clean tree, so no omitempty).
 	Status map[string]bool `json:"status"`
 	// ToolFiles are files the agent's tool hooks reported during the turn.
 	ToolFiles []string `json:"tool_files,omitempty"`
+	// Open says the turn was opened in the store at TurnStart (the prompt
+	// was delivered), so tool calls are delivered as they complete.
+	Open bool `json:"open,omitempty"`
+	// Delivered holds, per tool call delivered during the open turn, the
+	// keys that identify it (id, name+arguments hash, command, written
+	// paths), so the transcript read at turn end does not record it twice;
+	// a one-element group "path:<rel>" marks a path a delivered call wrote.
+	Delivered [][]string `json:"delivered,omitempty"`
+	// Tools are tool calls reported by hooks while no turn was open; they
+	// join the turn when it closes.
+	Tools []record.Tool `json:"tools,omitempty"`
 	// Started is set once the session start was delivered (some agents
 	// fire their first prompt hook before their session-start hook).
 	Started bool `json:"started,omitempty"`
@@ -89,7 +116,7 @@ func (s *State) Save(root string) error {
 	if err != nil {
 		return err
 	}
-	tmp := p + ".tmp"
+	tmp := fmt.Sprintf("%s.%d.tmp", p, os.Getpid())
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
@@ -205,4 +232,28 @@ func CurrentSession(root, agent string) string {
 		}
 	}
 	return ""
+}
+
+// lockSession takes an advisory lock on the session's state for the hook's
+// lifetime; the lock file stays (an inode-bound lock must not be unlinked).
+func lockSession(root, agent, id string) (func(), error) {
+	if !ValidSessionID(id) {
+		return nil, ErrBadSessionID
+	}
+	p := statePath(root, agent, id) + ".lock"
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: the Project's own lock file
+	if err != nil {
+		return nil, err
+	}
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return func() {
+		_ = unix.Flock(int(f.Fd()), unix.LOCK_UN)
+		_ = f.Close()
+	}, nil
 }
