@@ -45,6 +45,7 @@ type Host struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	opened os.FileInfo // sessions.db as the host opened it; nil when there was none
+	held   *os.File    // a handle on that file: unlinked means .atlas/ went away
 }
 
 // Stale reports that the Project's store is no longer the one this host
@@ -56,7 +57,7 @@ func (h *Host) Stale() bool {
 	switch {
 	case h.opened == nil:
 		return err == nil
-	case err != nil:
+	case err != nil || deleted(h.held):
 		return true
 	}
 	return !os.SameFile(h.opened, now)
@@ -68,6 +69,7 @@ func StartHost(root string, opt HostOptions) (*Host, error) {
 	h := &Host{Root: root, done: make(chan struct{})}
 	if fi, err := os.Stat(store.Path(root)); err == nil {
 		h.opened = fi
+		h.held, _ = os.Open(store.Path(root))
 	}
 	lock, err := store.Lock(root)
 	switch {
@@ -114,6 +116,9 @@ func StartHost(root string, opt HostOptions) (*Host, error) {
 func (h *Host) Capturing() bool { return h.Recorder != nil }
 
 func (h *Host) release() {
+	if h.held != nil {
+		_ = h.held.Close()
+	}
 	if h.Store != nil {
 		_ = h.Store.Close()
 	}

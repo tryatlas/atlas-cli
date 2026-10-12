@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite with FTS5
@@ -95,6 +96,7 @@ type Store struct {
 	ScopeRoot string
 	db        *sql.DB
 	opened    os.FileInfo // memory.sqlite as opened
+	held      *os.File    // a handle on it: unlinked means .atlas/ went away
 }
 
 // Stale reports that memory.sqlite on disk is no longer the file this store
@@ -102,7 +104,21 @@ type Store struct {
 // an mcp-bridge) must reopen it, or its writes go to a file no one sees.
 func (s *Store) Stale() bool {
 	now, err := os.Stat(Path(s.ScopeRoot))
-	return err != nil || s.opened == nil || !os.SameFile(s.opened, now)
+	return err != nil || s.opened == nil || unlinked(s.held) || !os.SameFile(s.opened, now)
+}
+
+// unlinked: the open file's link count is 0. A re-created file can reuse
+// the inode number (ext4 does), so the inode comparison alone misses it.
+func unlinked(f *os.File) bool {
+	if f == nil {
+		return false
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return true
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	return ok && st.Nlink == 0
 }
 
 // File names in <scope>/.atlas/memory/, as the desktop names them.
@@ -203,6 +219,7 @@ func openChecked(scopeRoot string, create bool) (*Store, error) {
 		return nil, err
 	}
 	s.opened, _ = os.Stat(path)
+	s.held, _ = os.Open(path) //nolint:gosec // G304: the record's own file
 	return s, nil
 }
 
@@ -241,7 +258,12 @@ func (s *Store) migrate() error {
 }
 
 // Close closes the record.
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	if s.held != nil {
+		_ = s.held.Close()
+	}
+	return s.db.Close()
+}
 
 // VerifyChain recomputes the revision hash chain.
 func (s *Store) VerifyChain() (ChainReport, error) { return verifyChain(s.db) }

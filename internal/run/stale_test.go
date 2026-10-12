@@ -16,7 +16,9 @@ func TestHostStaleWhenTheStoreIsReplaced(t *testing.T) {
 	}
 	_ = st.Close()
 	fi, _ := os.Stat(store.Path(root))
-	h := &Host{Root: root, opened: fi}
+	held, _ := os.Open(store.Path(root))
+	defer held.Close()
+	h := &Host{Root: root, opened: fi, held: held}
 	if h.Stale() {
 		t.Fatal("same store")
 	}

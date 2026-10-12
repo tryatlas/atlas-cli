@@ -1570,3 +1570,8 @@ lint and `go mod tidy -diff` clean; `make release-check` and `make snapshot`
 built the four archives and `checksums.txt`, and install.sh installed the
 snapshot from them. README redesigned with the banner
 (`docs/assets/banner.png`).
+- The first v0.4.0 tag's release run failed on Linux: ext4 gave a
+  re-created `sessions.db` the deleted file's inode number, so the inode
+  comparison missed a replaced store. The host and the memory record now
+  also hold a handle on the file they opened and treat a link count of 0
+  (unlinked) as stale. The tag was moved to the fixed commit.
