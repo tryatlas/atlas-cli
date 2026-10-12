@@ -37,6 +37,12 @@ type State struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 	// Turn is the number of turns delivered so far.
 	Turn int `json:"turn"`
+	// Tasks is the session's task list as an agent with incremental task
+	// tools (Claude Code's TaskCreate / TaskUpdate) built it.
+	Tasks []PlanTask `json:"tasks,omitempty"`
+	// TaskCalls are the task tool calls already applied (by call id), so a
+	// call seen by its hook and again in the transcript counts once.
+	TaskCalls []string `json:"task_calls,omitempty"`
 	// InTurn is set between TurnStart and TurnEnd.
 	InTurn bool `json:"in_turn,omitempty"`
 	// Offset is the transcript position at the last turn boundary.

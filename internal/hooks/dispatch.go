@@ -46,6 +46,9 @@ type Delivery struct {
 	// LinkFrom, when set, asks the writer to link the commits after it to
 	// the touches just recorded (commits made during the turn).
 	LinkFrom string `json:"link_from,omitempty"`
+	// Plan is the session's whole plan after an incremental task tool
+	// changed it, folded as plan_set.
+	Plan *PlanFold `json:"plan,omitempty"`
 }
 
 // OpenTurn is the prompt that opens a turn as it is submitted.
@@ -143,14 +146,16 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 		if ev.Tool != nil && ev.Tool.NativeID != "" {
 			if !st.Open {
 				st.Tools = append(st.Tools, *ev.Tool)
+				_ = trackTasks(st, *ev.Tool) // the turn-end delivery folds the plan
 				return nil, st.Save(d.Root)
 			}
 			st.Delivered = append(st.Delivered, toolKeys(*ev.Tool))
-			for _, p := range record.WritePaths(ev.Tool.Arguments, ev.Tool.Locations, ev.Tool.Diffs...) {
+			for _, p := range writtenPaths(*ev.Tool) {
 				rel, _ := record.ProjectPath(d.Root, p)
 				st.Delivered = append(st.Delivered, []string{"path:" + rel}) // explained: not a shell change
 			}
 			dl := Delivery{Root: d.Root, Session: sess, Tool: ev.Tool, At: now}
+			dl.Plan = trackTasks(st, *ev.Tool)
 			if record.CanonicalToolName(ev.Tool.Name, ev.Tool.Title, ev.Tool.Kind, ev.Tool.Arguments) == "Bash" && st.Status != nil {
 				// What the shell command changed is known now: its touches,
 				// and the baseline for the rest of the turn moves past them.
@@ -204,11 +209,24 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 			linkFrom = st.TurnHead // commits made during the turn
 		}
 		st.Head, st.TurnHead = "", ""
+		// Task tool calls the hooks did not deliver (or that came before
+		// the turn opened) still build the plan, once each.
+		var plan *PlanFold
+		for _, it := range turn.Items {
+			if it.Tool != nil {
+				if p := trackTasks(st, *it.Tool); p != nil {
+					plan = p
+				}
+			}
+		}
+		if plan == nil && len(st.Tasks) > 0 && hadTaskCalls(turn.Items) {
+			plan = planFromTasks(st.Tasks)
+		}
 		if err := st.Save(d.Root); err != nil {
 			return nil, err
 		}
 		sess.Model = st.Model
-		return nil, d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, Turn: turn, At: now, LinkFrom: linkFrom})
+		return nil, d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, Turn: turn, At: now, LinkFrom: linkFrom, Plan: plan})
 
 	case Compaction:
 		return nil, st.Save(d.Root)
@@ -290,7 +308,7 @@ func (d *Dispatcher) turnEnd(ctx context.Context, a Agent, st *State, ev *Event)
 		if it.Tool == nil {
 			continue
 		}
-		for _, p := range record.WritePaths(it.Tool.Arguments, it.Tool.Locations, it.Tool.Diffs...) {
+		for _, p := range writtenPaths(*it.Tool) {
 			rel, _ := record.ProjectPath(d.Root, p)
 			explained[rel] = true
 		}
@@ -503,4 +521,15 @@ func Enabled(ctx context.Context, root string) bool {
 	defer st.Close()
 	b, err := st.Binding(ctx)
 	return err == nil && b != nil && b.Enabled
+}
+
+// writtenPaths are the files a tool call wrote. A call that only read or
+// searched names files too (its locations), but explains no change: a file
+// the agent read and then committed is the commit's change.
+func writtenPaths(t record.Tool) []string {
+	name := record.CanonicalToolName(t.Name, t.Title, t.Kind, t.Arguments)
+	if !record.WritesFiles(name) && len(t.Diffs) == 0 {
+		return nil
+	}
+	return record.WritePaths(t.Arguments, t.Locations, t.Diffs...)
 }

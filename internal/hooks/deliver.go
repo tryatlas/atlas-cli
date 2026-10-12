@@ -97,7 +97,12 @@ func apply1(ctx context.Context, rec *record.Recorder, mem *server.Server, d Del
 				return err
 			}
 			if mem != nil {
-				foldChanges(ctx, mem, g, d.Root, &record.CapturedTurn{Items: []record.CapturedItem{{Tool: d.Tool}}, Changed: d.Changed})
+				one := []record.CapturedItem{{Tool: d.Tool}}
+				foldChanges(ctx, mem, g, d.Root, &record.CapturedTurn{Items: one, Changed: d.Changed})
+				foldPlans(ctx, mem, g, one)
+				if d.Plan != nil {
+					_ = mem.Fold(ctx, g, memrecord.Event{Kind: "plan_set", Text: d.Plan.Text, Status: d.Plan.Status})
+				}
 			}
 		case d.Turn != nil:
 			if _, err := rec.RecordTurn(ctx, d.Session, *d.Turn); err != nil {
@@ -105,6 +110,10 @@ func apply1(ctx context.Context, rec *record.Recorder, mem *server.Server, d Del
 			}
 			if mem != nil {
 				foldChanges(ctx, mem, g, d.Root, d.Turn)
+				foldPlans(ctx, mem, g, d.Turn.Items)
+				if d.Plan != nil {
+					_ = mem.Fold(ctx, g, memrecord.Event{Kind: "plan_set", Text: d.Plan.Text, Status: d.Plan.Status})
+				}
 				for _, it := range d.Turn.Items {
 					if it.Tool == nil && it.Mode != "thinking" {
 						mem.Capture(ctx, g, it.Body)

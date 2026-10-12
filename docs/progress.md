@@ -1321,3 +1321,243 @@ integration's own id (`claude-code`, `codex`, `cursor`, `copilot`,
 `opencode`, `droid`, `antigravity`, `pi`). Candidates, handoff notes and the
 extractor stay. Sessions recorded by 0.3.3 keep the names they were written
 with.
+
+## v0.4.0: guided init, `atlas sync`, `atlas settings`
+
+At the user's request ("init with an all-selection option: org, project,
+agents with an add-all option, sync daemon on/off as `atlas sync`; a properly
+designed Bubble Tea UI and an `atlas settings` screen"):
+
+- **`atlas init` is a four-step flow** on a terminal (`tui.StepSelect`,
+  `tui.StepMulti`): Organisation, Project (the fingerprint match first and
+  marked, the org's other Projects, "+ Create a new Project"), Agents (a
+  checklist of the agents detected here, all pre-checked, with an
+  **All agents** row; `a`/`n` select all or none), Background sync (On/Off).
+  Each answered step collapses to a `✓ n. Step  answer` line; esc leaves a
+  `✗`. Long lists scroll. The binding is written and the store released
+  before step 3, so the listener can take it. `--local` asks step 3 only.
+  New flags: `--agents`, `--all-agents`, `--sync on|off`; without a
+  terminal and without them, init hooks nothing (as before). A signed-out
+  `atlas init` on a terminal offers "Sign in" or "Set up locally".
+- **`atlas sync [on|off|status]`**: on starts a detached `atlas serve` and
+  records `backgroundSync` in `prefs.json` in the CLI state directory; off
+  stops it and clears it. While it is on, a SessionStart or TurnStart hook
+  restarts a missing listener (after its own delivery, at most once a
+  minute: the desktop may hold the store). `atlas status` shows a
+  `Listener:` line. `atlas serve --daemon/--stop` stay as the low-level
+  form.
+- **`atlas settings`**: a full-screen Bubble Tea screen with a sidebar
+  (Account, Project, Agents, Sync, About) and a detail pane. Toggles:
+  session capture, shared memory, each agent (install/remove hook and
+  memory entry), background sync; actions: add all detected agents, sync
+  now, retry failed. Changes run through the same code as the commands, off
+  the UI loop, with a spinner and a status line. Without a terminal it
+  prints the rows.
+- `installAgents` / `removeAgents` are shared by `atlas agents`, init and
+  settings; `launchListener` / `haltListener` by serve, sync and settings.
+- Verified live in a pty: init steps 1–3 against the real account
+  (cancelled before connecting a Project), the agent checklist installing
+  only the picked agents, the settings screen toggling an agent, and
+  `atlas sync on` → kill -9 → a Claude SessionStart hook restarting the
+  listener.
+- **Fix: a commit of a file the agent had read got no checkpoint.** The
+  dispatcher treats the files a tool call names as "explained", so git's
+  view of the shell call that follows does not count them twice. Read and
+  Search calls name files too (OpenCode's read metadata, Claude's
+  `file_path`), so after "read greet.js, then git add && git commit" the
+  commit's change was dropped as explained: no touch, no checkpoint. Now
+  only calls that write (Edit, Write, Delete, Move, or carrying a diff)
+  explain a path (`writtenPaths`). Test:
+  `TestCommittingAFileWrittenBeforeTheTurnGetsItsCheckpoint` (fails before
+  the fix). Verified live with OpenCode and Claude Code: read, then commit,
+  gives a linked checkpoint with the file.
+- **TUI redesign after `Tui-design-ins/`** (the user's references: a
+  breadcrumb over a rule and a `[KEY] label` footer; Oxide's tree of
+  answered steps with green answers and a block progress bar; Cursor's
+  ☒ ▣ ☐ checklist and ⬢ status; a mail client's titled panels, `<n>` key
+  badges and coloured tags; a highlight bar on the selected row). Shared
+  pieces in `internal/tui/frame.go` (`Crumb`, `Rule`, `Keys`, `Badge`,
+  `Tag`, `Bar`, `TreeLine`, `Upper`, `Panel`, `Fit`, `Wrap`, `Indent`),
+  colours in the theme (ANSI indices, so the terminal's palette decides).
+  - `atlas init`: each step is `atlas / setup / <step>`, `STEP n OF 4`
+    with a ▮▯ bar, the question, options on the highlight bar, the key
+    footer; an answered step becomes `├ Step  answer` and the run ends
+    `└ ⬢ Atlas is ready in …`; install output stays on the tree's stem
+    (wrapped at 76). Lists fit the terminal and scroll. A cancelled step
+    ends `└ Step  cancelled` with no second error line.
+  - `atlas settings`: Sections, rows and Details panels (two panels under
+    110 columns), `<1>`–`<5>` badges with icons, ON/OFF/RUN tags, a
+    spinner while a change applies, `⬢ result` or `✗ error` in the footer.
+  - `atlas memory browse`: the same frame, kind tabs on the highlight bar,
+    Entries and Entry panels, upper-case field labels.
+  Checked by rendering the real screens to PNG (pyte + Pillow) at 100 and
+  120 columns.
+- **`atlas update [--check] [--version vX.Y.Z]`** (`internal/update`): reads
+  the latest release from the GitHub API (or takes the tag given), downloads
+  `atlas_<ver>_<os>_<arch>.tar.gz` and `checksums.txt` as install.sh does,
+  refuses a checksum mismatch, extracts `atlas`, and renames it over the
+  running binary (resolved through symlinks; a temp file next to it, mode
+  kept). A development build (`0.4.0-dev`) counts as older than its
+  release. A background listener for the Project in the cwd is restarted
+  on the new binary. `ATLAS_UPDATE_BASE_URL` replaces the download base.
+  Settings → About has "Check for updates" and "Update atlas". Verified
+  live: a 0.3.0 build updated itself to v0.3.4 from GitHub.
+- **Atlas look across every command** (the user: "Bubble Tea animations,
+  but no gradients; our Atlas design colours; our logo; every command with
+  a TUI"). From the desktop app (`crates/atlas-theme/themes/atlas.toml`,
+  `src/assets/atlas-icon.svg`):
+  - **Palette** (`tui/theme.go`): the app's hex colours, dark and light;
+    monochrome first, the selection an inversion (white bar, black text),
+    colour only for status (success #9ecf8a, warning #ffff00, error
+    #f44747, info #6796e6), the logo cream #FFFFE2. No gradients: every
+    animation switches between two tones. Light or dark from
+    `ATLAS_THEME=light|dark`, else `COLORFGBG`, else dark (the terminal is
+    not queried: one that does not answer would hang). Colours are cut
+    down to the terminal's profile (`tui.Out`).
+  - **Logo** (`tui/logo.go`): the mark's exact dot grid (three stripes, 4
+    dots wide, 14 tall, one column right every two rows): `LogoSmall` a 5-row `●●●` miniature (braille was dropped: some fonts
+    draw its empty dots, which turned the logo into noise), `Mark`
+    `▟▛ ▟▛ ▟▛` (block quadrants, a slanted bar in any font), `Wordmark`. Reveal animation lights the stripes one
+    by one from the bottom; the working spinner pulses the three stripes.
+  - **Every command on a terminal**: `atlas` alone shows the splash (logo
+    lighting up, commands by group); `--help` is styled; `login` is a
+    screen with the code boxed, the URL and a live expiry countdown;
+    `whoami`, `org list`, `agents list|sessions`, `memory list` are
+    sections and tables with status dots; `status` is a card grouped
+    Account / Project / Capture and sync / Agents with dots; `logout`,
+    `org create`, `capture sync|retry|link`, `memory verify|export|import`,
+    `sync on|off`, `update` run under the pulsing mark with live steps and
+    end `✓ …` or `✗ …`; `serve` in the foreground is a live screen with a
+    feed of hook events (prompt, tool, reply, commit linked); `init` opens
+    with the logo; settings carries the logo in its sidebar. Pipes and
+    scripts get the same plain text as before (all tests unchanged).
+    `ATLAS_NO_ANIMATION=1` skips the reveal.
+- **The logo is Array Bold's `///`** (Fontshare's Array, as the user pointed out; checked against the font's own "/" glyph: round dots, 4 wide, 14 tall, one column right every two rows). `tui.Logo` keeps every dot column and puts two dot rows in each text row, so the slope and the 1.7:1 proportions hold: 7 rows × 24 columns, three stripes 3 columns apart. It is the only logo (splash, `init` intro, settings sidebar); the 5-row miniature and the braille version are gone.
+- Headers read `Atlas  settings / account` (no mark); the settings sidebar has no logo. The logo is on the splash and the `init` intro only.
+- **Tree lists and a real progress bar** (the user's references: Oxide's
+  `├ Title Colossal Cave Adventure` tree and its green `▮▮▮▯▯▯` bar).
+  Lists (init's options, settings sections and rows) are trees: a gold
+  `├`/`└` (the app's terminal yellow #e5c07b), the label, the value in
+  green; the selected row is `▸` on the app's selection grey (#303030), not
+  a white bar; badges and icons are gone. Values read `on` (green), `off`
+  (dim), `run ↵` (gold). Waiting is a progress bar (green `▮` over `▯`)
+  under a bold title with the elapsed time: it eases toward 90% while the
+  work runs, steps on as each step reports (shown as tree lines), and fills
+  before `✓ …`. Init's last phase runs as "Initializing Atlas in <root>"
+  under it, each agent installed a step.
+
+## Memory parity with the app's .atlas/memory (and the "lost memory" bug)
+
+- **Bug: a listener kept writing into a deleted store.** In test-cli the user
+  deleted `.atlas/` and ran `atlas init` again while a background `atlas
+  serve` (started earlier) still ran. It held the deleted `sessions.db`,
+  `sessions.lock` and `memory.sqlite` open, so every hook delivered into
+  files no one could see: no sessions, no `memory/` folder. Now the host
+  records the store it opened and `Host.Stale()` compares it with what is
+  on disk (`os.SameFile`); the listener checks every 2 s and stops, and
+  refuses deliveries meanwhile, so hooks write the new store directly and
+  the next one restarts the listener (background sync on). The memory
+  server reopens a record whose file was replaced (`record.Store.Stale`),
+  which also covers a long-lived `mcp-bridge`. Verified live: re-init under
+  a running listener, then a Claude session: the session and its memory
+  land in the new store, a new listener starts.
+- `atlas init` creates `.atlas/memory/memory.sqlite` when shared memory is
+  on (the app creates it on the first session; the folder shows from the
+  start).
+- Extractor progress is the desktop's file and format:
+  `.atlas/memory/extract-state/<sanitized session>.json` with
+  `last_extracted_turn_index`, `tool_calls_since_last`, `extraction_count`
+  (written atomically; the CLI's old state file is read once and removed;
+  the pass lock stays in the CLI state dir). A session not in the store is
+  skipped, not logged as an error (the "sql: no rows" hook errors).
+- `memory.snapshot.sqlite`: the desktop's daily backup (`VACUUM INTO`, a
+  `snapshot_meta` 'at' stamp, rename), refreshed at session start at most
+  once a day. A damaged record (quick_check, malformed) is quarantined as
+  `memory.sqlite.corrupt-<ms>`, the snapshot copied in, and `restored.json`
+  written, as `RecordStore::open` does; a record declined for its schema
+  version is never quarantined.
+- Not done, by design or pending a decision: `corpus.sqlite` and its
+  `.usearch` (the "documents" leg of memory_search, MiniLM embeddings via
+  candle in the app), the record's `embed_cache` (dense search), the
+  `memory-index/policy.json` cache (the app's Policy view only), and
+  `code-index/` (the atlas_code tools).
+
+## Memory search like the app: embeddings, corpus, hybrid memory_search
+
+The user: "those are important for shared memory" (the corpus, the vectors).
+Everything below is byte-compatible with the desktop, so either side keeps
+what the other wrote.
+
+- **`internal/embed`: MiniLM in pure Go** (no cgo). BERT WordPiece tokenizer
+  from `tokenizer.json` (BertNormalizer: clean text, CJK spacing, accent
+  strip, lowercase; BertPreTokenizer; WordPiece `##`, [UNK], 100 chars; added
+  tokens matched first; truncation 512 with [CLS]/[SEP], as atlas-embed
+  overrides it), a 6-layer encoder over `model.safetensors` (float32, erf
+  GELU, LayerNorm 1e-12), mean pooling, L2 norm. It reads the model the app
+  downloads (`<app data>/models/all-MiniLM-L6-v2/`; `ATLAS_MODELS_DIR`
+  overrides) and downloads it there the app's way (`.part`, rename) when
+  asked. Checked against the app: 54 entries of the atlas-cli record hit
+  the app's own cache keys, every Go vector at cosine 1.000000 to the app's.
+  ~55 ms a memory on this machine.
+- **Record vectors** (`memory.sqlite` `embed_cache`): key blake3(model ‖ 0 ‖
+  text), model `all-MiniLM-L6-v2-384`, f16 LE (768 bytes). A durable
+  `Remember` is embedded before its transaction; a write that matches no key
+  or text merges into the closest same-kind memory at cosine ≥ 0.92 unless
+  both are keyed or the texts contradict (numbers, negation:
+  `ContradictsText`, the app's consolidate rule). `SyncVectors` backfills
+  and drops garbage keys; `Forget` purges the vectors of every text the
+  entry had.
+- **Hybrid search** (`record.Search`, the app's search_explained): BM25 leg
+  and meaning leg (cosine ≥ 0.35, 100 deep, exact over the cache) fused by
+  RRF k 60, priors trust 0.5 and recency 0.3 over max(last use, update);
+  `why` reports `bm25` and `dense` ranks. No model: keyword only.
+- **Corpus** (`internal/memory/corpus`, `.atlas/memory/corpus.sqlite`): the
+  app's schema; docs from the project's CLAUDE.md and AGENTS.md (mirrored
+  block and injected context stripped), `.atlas/knowledge` notes, active
+  durable memories with a log position (caps 50/30/30/50), and captured
+  sessions of agents without a dedicated reader (12 KiB of role lines).
+  Content hash sha256(title\n\ntext), vkey from blake3(id), cache key
+  blake3(model ‖ 0 ‖ hash hex), title/body split, user/repo scope; changed
+  docs are re-embedded, `vectors_dirty:<model>` set so the app rebuilds its
+  usearch file. The CLI never reads agent folders (Claude's memory dir,
+  ~/.claude, ~/.codex) and never deletes the documents the app reads from
+  them (`Owned`). Checked against the app: all 9 documents both produce for
+  atlas-cli have the app's content hash.
+- **memory_search documents**: when no kinds are given, up to 6 (limit,
+  max 20) from the corpus: dense (cosine ≥ 0.30) and BM25, pool max(4·limit,
+  20), RRF, Jaccard ≥ 0.8 dedup, a forgotten memory's doc filtered out; the
+  query embedded untrimmed. `memory_forget` evicts the doc at once.
+- **When it runs**: `atlas memory index` (downloads the model unless
+  `--no-download`, progress bar), after a session ends (detached, never
+  downloads), after an extraction stores memories, every 15 min in
+  `atlas serve`, and `atlas init` asks to download the model (a "Memory
+  search" step) when it is missing. Settings shows "Memory search: meaning
+  and keywords" and a "Build memory index" action.
+- Verified live: a Claude session asked `memory_search` "how do we say hi to
+  people" and got both greeting memories by meaning (`why: {dense: 1}`,
+  `{dense: 2}`) and the CLAUDE.md rule and the shared decision as documents.
+- Still the app's alone: `memory-index/policy.json` (the Policy view's
+  cache), `code-index/` (atlas_code tools), the global memory blend.
+- **Settings ▸ Model**: the local MiniLM model's state (downloaded and its
+  size, or not), what memory search uses (meaning and keywords, or keywords
+  only), where the files live (shared with the app), and actions: Download
+  model (87 MB from Hugging Face, the bar and "n of 87 MB" in the row, then
+  the Project's memories embedded and documents indexed), Build memory
+  index, Remove model (asks for a second enter: the app uses the same
+  files). Settings actions can now report progress (`settings.Progresser`)
+  and ask for confirmation (`Item.Confirm`). The embedder notices a model
+  downloaded in the same process. Verified live into a scratch
+  ATLAS_MODELS_DIR: the files match the app's byte for byte in size.
+- **Plans from agents run in their own UIs.** Only the parked ACP path
+  folded plans (`plan_set`); hook capture never did, so the Plan tab stayed
+  empty. Now the agents' plan tools are read as they complete and at turn
+  end: Claude Code's and Droid's `TodoWrite`, Codex's `update_plan`,
+  OpenCode's `todowrite`, Cursor's `todo_write`, Copilot's `update_todo`
+  (a list or a Markdown checklist), Claude Code's `ExitPlanMode` (the plan
+  as Markdown), and Claude Code's incremental `TaskCreate` / `TaskUpdate`
+  (the list kept in the hook session state, each call applied once by its
+  id, replayed from the transcript when its hook did not deliver it). The
+  plan is the ACP text ("- [status] item", 600 chars) and is `done` once
+  every item is completed; each new plan supersedes the last.
+  `memory_briefing` gives it to the next session as the active plan.
+  Verified live with OpenCode (`todowrite` → the plan entry).

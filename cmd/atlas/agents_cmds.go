@@ -16,6 +16,7 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/hooks"
 	"github.com/tryatlas/atlas-cli/internal/hooks/mcpconfig"
 	"github.com/tryatlas/atlas-cli/internal/project"
+	"github.com/tryatlas/atlas-cli/internal/tui"
 )
 
 // atlas agents: the agents that run in their own UIs and report to Atlas
@@ -85,13 +86,34 @@ func runAgentsAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if changed, err := hooks.InstallGitHooks(ctx, p.Root); err != nil {
+	w := out
+	if interactive() {
+		tui.Header(out, "agents", "add")
+		fmt.Fprintln(out)
+		w = agentLines(out)
+	}
+	if err := installAgents(ctx, w, p.Root, agents, force, noMem); err != nil {
+		return err
+	}
+	if interactive() {
+		fmt.Fprintln(out)
+		tui.Note(out, "Use the agents as usual in "+p.Root+"; sessions are captured as they run. atlas status shows them.")
+	} else {
+		fmt.Fprintf(out, "Use the agents as usual in %s; sessions are captured as they run. atlas status shows them.\n", p.Root)
+	}
+	return nil
+}
+
+// installAgents writes the git hook, then each agent's hook and memory entry,
+// one line per agent.
+func installAgents(ctx context.Context, out io.Writer, root string, agents []hooks.Agent, force, noMem bool) error {
+	if changed, err := hooks.InstallGitHooks(ctx, root); err != nil {
 		return fmt.Errorf("git hooks: %w", err)
 	} else if changed {
 		fmt.Fprintln(out, "Installed the git post-commit hook (links sessions to commits).")
 	}
 	for _, a := range agents {
-		changed, err := a.Install(p.Root, force)
+		changed, err := a.Install(root, force)
 		if err != nil {
 			return fmt.Errorf("%s: %w", a.ID(), err)
 		}
@@ -101,12 +123,12 @@ func runAgentsAdd(cmd *cobra.Command, args []string) error {
 		}
 		line := fmt.Sprintf("%s: hook %s", a.Name(), what)
 		if w, ok := mcpconfig.For(a.ID()); ok && !noMem {
-			mchanged, err := w.Write(p.Root)
+			mchanged, err := w.Write(root)
 			if err != nil {
 				return fmt.Errorf("%s memory config: %w", a.ID(), err)
 			}
 			if mchanged {
-				line += ", memory server added to " + strings.TrimPrefix(w.Path(p.Root), p.Root+"/")
+				line += ", memory server added to " + strings.TrimPrefix(w.Path(root), root+"/")
 			} else {
 				line += ", memory server present"
 			}
@@ -121,7 +143,6 @@ func runAgentsAdd(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(out, "  note: %s\n", n.AddNote())
 		}
 	}
-	fmt.Fprintf(out, "Use the agents as usual in %s; sessions are captured as they run. atlas status shows them.\n", p.Root)
 	return nil
 }
 
@@ -137,12 +158,38 @@ func runAgentsRemove(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if interactive() {
+		tui.Header(out, "agents", "remove")
+		fmt.Fprintln(out)
+		out = agentLines(out)
+	}
+	return removeAgents(ctx, out, p.Root, agents)
+}
+
+// agentLines styles installAgents' and removeAgents' lines on a terminal:
+// "Claude Code: hook installed, …" becomes "✓ Claude Code  hook installed, …",
+// notes go faint under it.
+func agentLines(w io.Writer) io.Writer {
+	return tui.Lines(w, func(l string) string {
+		if n, ok := strings.CutPrefix(l, "  note: "); ok {
+			return "    " + tui.Default.Faint.Render("↳ "+n)
+		}
+		if name, rest, ok := strings.Cut(l, ": "); ok && !strings.Contains(name, " the ") {
+			return tui.Default.Success.Render("✓") + " " + tui.Default.Bold.Render(fmt.Sprintf("%-20s", name)) + " " + tui.Default.Faint.Render(rest)
+		}
+		return tui.Default.Success.Render("✓") + " " + l
+	})
+}
+
+// removeAgents takes the Atlas entries out of each agent's config, and the
+// git hook once no agent is left.
+func removeAgents(ctx context.Context, out io.Writer, root string, agents []hooks.Agent) error {
 	for _, a := range agents {
-		if err := a.Uninstall(p.Root); err != nil {
+		if err := a.Uninstall(root); err != nil {
 			return fmt.Errorf("%s: %w", a.ID(), err)
 		}
 		if w, ok := mcpconfig.For(a.ID()); ok {
-			if err := w.Remove(p.Root); err != nil {
+			if err := w.Remove(root); err != nil {
 				return fmt.Errorf("%s memory config: %w", a.ID(), err)
 			}
 		}
@@ -150,12 +197,12 @@ func runAgentsRemove(cmd *cobra.Command, args []string) error {
 	}
 	left := false
 	for _, a := range hooks.All() {
-		if a.State(p.Root) != hooks.Absent {
+		if a.State(root) != hooks.Absent {
 			left = true
 		}
 	}
 	if !left {
-		if err := hooks.UninstallGitHooks(ctx, p.Root); err != nil {
+		if err := hooks.UninstallGitHooks(ctx, root); err != nil {
 			return err
 		}
 		fmt.Fprintln(out, "No agent left: the git post-commit hook was removed too.")
@@ -168,6 +215,9 @@ func runAgentsList(cmd *cobra.Command, _ []string) error {
 	root := ""
 	if p, err := agentRoot(ctx); err == nil {
 		root = p.Root
+	}
+	if interactive() {
+		return agentsTable(cmd.OutOrStdout(), root)
 	}
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "AGENT\tNAME\tBINARY\tHOOK\tMEMORY")
@@ -196,6 +246,44 @@ func runAgentsList(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// agentsTable is atlas agents list on a terminal.
+func agentsTable(out io.Writer, root string) error {
+	tui.Header(out, "agents")
+	fmt.Fprintln(out)
+	state := func(st hooks.InstallState) string {
+		switch st {
+		case hooks.Current:
+			return tui.Dot(tui.Good, "installed")
+		case hooks.Outdated:
+			return tui.Dot(tui.Warn, "outdated")
+		}
+		return tui.Dot(tui.Idle, "off")
+	}
+	var rows [][]string
+	for _, a := range hooks.All() {
+		bin := tui.Default.Faint.Render("not on PATH")
+		if _, err := exec.LookPath(a.Binary()); err == nil {
+			bin = a.Binary()
+		}
+		hook, mem := tui.Default.Faint.Render("-"), tui.Default.Faint.Render("-")
+		if root != "" {
+			hook = state(a.State(root))
+			if mw, ok := mcpconfig.For(a.ID()); ok {
+				mem = state(mw.State(root))
+			}
+		}
+		rows = append(rows, []string{a.Name(), tui.Default.Faint.Render(a.ID()), bin, hook, mem})
+	}
+	fmt.Fprint(out, tui.Table([]string{"agent", "id", "binary", "hook", "memory"}, rows))
+	fmt.Fprintln(out)
+	if root == "" {
+		tui.Note(out, "Not in an Atlas Project: run atlas init, then atlas agents add <agent>.")
+	} else {
+		tui.Note(out, "atlas agents add <id> · atlas agents add --all · atlas settings")
+	}
+	return nil
+}
+
 func runAgentsSessions(cmd *cobra.Command, _ []string) error {
 	p, err := agentRoot(cmd.Context())
 	if err != nil {
@@ -207,6 +295,28 @@ func runAgentsSessions(cmd *cobra.Command, _ []string) error {
 	}
 	if len(states) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "No session seen by the hooks yet.")
+		return nil
+	}
+	if interactive() {
+		out := cmd.OutOrStdout()
+		tui.Header(out, "agents", "sessions")
+		fmt.Fprintln(out)
+		var rows [][]string
+		for _, s := range states {
+			st := tui.Dot(tui.Good, "idle")
+			switch {
+			case s.Ended:
+				st = tui.Dot(tui.Idle, "ended")
+			case s.InTurn:
+				st = tui.Dot(tui.Warn, "in a turn")
+			}
+			resume := ""
+			if a, ok := hooks.Get(s.Agent); ok {
+				resume = a.ResumeCommand(s.SessionID)
+			}
+			rows = append(rows, []string{s.Agent, tui.Fit(s.SessionID, 28), fmt.Sprint(s.Turn), st, ago(s.UpdatedAt), tui.Default.Faint.Render(resume)})
+		}
+		fmt.Fprint(out, tui.Table([]string{"agent", "session", "turns", "state", "last", "resume"}, rows))
 		return nil
 	}
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)

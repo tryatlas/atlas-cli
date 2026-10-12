@@ -87,7 +87,11 @@ func (s *Server) store(ctx context.Context, cwd string) (*record.Store, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if st, ok := s.stores[scope]; ok {
-		return st, nil
+		if !st.Stale() {
+			return st, nil
+		}
+		_ = st.Close() // .atlas/ was deleted or re-created: open the new record
+		delete(s.stores, scope)
 	}
 	st, err := record.Open(scope, true)
 	if err != nil {
@@ -114,6 +118,7 @@ func (s *Server) SessionStarted(ctx context.Context, g Grant) {
 	}
 	if st, err := s.store(ctx, g.Cwd); err == nil {
 		_ = st.SessionStart(ctx, g.SessionID, g.Agent, s.now())
+		_, _ = st.SnapshotIfDue(s.now()) // the desktop's daily backup, at most once a day
 	}
 }
 

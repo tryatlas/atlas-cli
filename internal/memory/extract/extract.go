@@ -10,6 +10,7 @@ package extract
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,30 +55,68 @@ type Options struct {
 // ErrSkipped says a gate kept the pass from running.
 var ErrSkipped = errors.New("extraction skipped")
 
+// state is the extractor's progress for one session, in the desktop's file
+// and format (crates/atlas-memory/src/extract.rs ExtractState):
+// <scope>/.atlas/memory/extract-state/<sanitized session>.json.
 type state struct {
-	LastTurn        int64 `json:"last_extracted_turn"`
+	LastTurn        int64 `json:"last_extracted_turn_index"`
+	ToolCallsSince  int   `json:"tool_calls_since_last"`
 	ExtractionCount int   `json:"extraction_count"`
 }
 
-func statePath(root, session string) string {
-	return filepath.Join(clistate.Path(root, "extract"), session+".json")
+// sanitize keeps a session id filesystem-safe, as the desktop does.
+func sanitize(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 128 && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return r
+		}
+		return '_'
+	}, s)
 }
 
-func loadState(root, session string) state {
+func statePath(scope, session string) string {
+	return filepath.Join(filepath.Dir(record.Path(scope)), "extract-state", sanitize(session)+".json")
+}
+
+// legacyStatePath is where CLIs up to 0.4 kept it.
+func legacyStatePath(root, session string) string {
+	return filepath.Join(clistate.Dir(root), "extract", session+".json")
+}
+
+func loadState(scope, root, session string) state {
 	var s state
-	if b, err := os.ReadFile(statePath(root, session)); err == nil {
+	if b, err := os.ReadFile(statePath(scope, session)); err == nil {
 		_ = json.Unmarshal(b, &s)
+		return s
+	}
+	if b, err := os.ReadFile(legacyStatePath(root, session)); err == nil {
+		var old struct {
+			LastTurn        int64 `json:"last_extracted_turn"`
+			ExtractionCount int   `json:"extraction_count"`
+		}
+		if json.Unmarshal(b, &old) == nil {
+			s.LastTurn, s.ExtractionCount = old.LastTurn, old.ExtractionCount
+		}
 	}
 	return s
 }
 
-func (s state) save(root, session string) error {
-	p := statePath(root, session)
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+// save writes atomically (temp file, rename), as the desktop does.
+func (s state) save(scope, root, session string) error {
+	p := statePath(scope, session)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
 	b, _ := json.MarshalIndent(s, "", "  ")
-	return os.WriteFile(p, b, 0o600)
+	tmp := fmt.Sprintf("%s.%d.tmp", p, os.Getpid())
+	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil { //nolint:gosec // G306: the app reads it; no secret
+		return err
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		return err
+	}
+	_ = os.Remove(legacyStatePath(root, session))
+	return nil
 }
 
 // summariserLocal reads <root>/.atlas/memory-summarizer.json: mode "local"
@@ -115,8 +154,12 @@ func Run(ctx context.Context, o Options) (int, error) {
 		return 0, ErrSkipped
 	}
 	defer unlock()
-	st := loadState(o.Root, o.Session)
+	scope := project.ScopeRoot(ctx, o.Root)
+	st := loadState(scope, o.Root, o.Session)
 	excerpt, last, tools, err := conversation(ctx, o.Root, o.Session, st.LastTurn)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrSkipped // the session is not in this store (yet)
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -125,6 +168,10 @@ func Run(ctx context.Context, o Options) (int, error) {
 	case turns <= 0 || strings.TrimSpace(excerpt) == "":
 		return 0, ErrSkipped
 	case !o.Final && (turns < MinTurns || tools < MinToolCalls):
+		if tools != st.ToolCallsSince {
+			st.ToolCallsSince = tools
+			_ = st.save(scope, o.Root, o.Session)
+		}
 		return 0, ErrSkipped
 	}
 	token, org, err := o.Auth(ctx)
@@ -135,7 +182,7 @@ func Run(ctx context.Context, o Options) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	mem, err := record.Open(project.ScopeRoot(ctx, o.Root), true)
+	mem, err := record.Open(scope, true)
 	if err != nil {
 		return 0, err
 	}
@@ -157,13 +204,14 @@ func Run(ctx context.Context, o Options) (int, error) {
 		n++
 	}
 	st.LastTurn = last
+	st.ToolCallsSince = 0
 	st.ExtractionCount++
 	if o.Final && n > 0 {
 		// The handoff was written at session end, before this pass: rewrite
 		// it so the next session sees what was distilled.
-		_ = mem.WriteHandoff(ctx, o.Session, o.Agent, project.ScopeRoot(ctx, o.Root), o.Now().UnixMilli())
+		_ = mem.WriteHandoff(ctx, o.Session, o.Agent, scope, o.Now().UnixMilli())
 	}
-	return n, st.save(o.Root, o.Session)
+	return n, st.save(scope, o.Root, o.Session)
 }
 
 var injected = regexp.MustCompile(`(?s)<(system-reminder|local-command-caveat|local-command-stdout|command-message|task-notification)[^>]*>.*?</(system-reminder|local-command-caveat|local-command-stdout|command-message|task-notification)>`)
@@ -351,7 +399,7 @@ func call(ctx context.Context, o Options, token, org, method, path string, body 
 
 // tryLock takes the session's extraction lock without waiting.
 func tryLock(root, session string) (func(), bool) {
-	p := statePath(root, session) + ".lock"
+	p := legacyStatePath(root, session) + ".lock" // the CLI's own: .atlas/ holds only the app's files
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return nil, false
 	}

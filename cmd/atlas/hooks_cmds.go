@@ -100,6 +100,12 @@ func runAgentHook(a hooks.Agent, verb string) func(*cobra.Command, []string) err
 		if err == nil && (ev.Kind == hooks.TurnEnd || ev.Kind == hooks.SessionEnd) {
 			spawnExtract(p.Root, a.ID(), ev.SessionID, ev.Kind == hooks.SessionEnd)
 		}
+		if err == nil && ev.Kind == hooks.SessionEnd {
+			spawnIndex(p.Root) // the session's document and any new memories
+		}
+		if ev.Kind == hooks.SessionStart || ev.Kind == hooks.TurnStart {
+			ensureListener(p.Root) // after the delivery, so nothing is spooled behind a starting listener
+		}
 		return nil
 	}
 }
@@ -155,6 +161,11 @@ func runHookExtract(cmd *cobra.Command, _ []string) error {
 		hooks.LogError(root, agent, "extract", err)
 	case n > 0:
 		hooks.ClearLastError(root)
+		// New memories: their vectors and documents, as the app reindexes
+		// after an extraction. This process is already detached.
+		if p, perr := project.Discover(ctx, root); perr == nil {
+			_, _ = indexMemory(ctx, p.Root, p.ScopeRoot, false, func(string) {}, func(float64) {})
+		}
 	}
 	return nil
 }

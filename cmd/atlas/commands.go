@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tryatlas/atlas-cli/internal/tui"
 )
 
 // notImplementedError is returned by every command that has not been built yet.
@@ -26,6 +28,14 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.SetVersionTemplate("atlas {{.Version}}\n")
+	root.SetHelpFunc(styledHelp(root.HelpFunc()))
+	root.RunE = func(cmd *cobra.Command, _ []string) error {
+		if !interactive() {
+			return cmd.Help()
+		}
+		splash(cmd)
+		return nil
+	}
 
 	root.AddCommand(
 		newLoginCmd(),
@@ -36,6 +46,9 @@ func newRootCmd() *cobra.Command {
 		newMemoryCmd(),
 		newCaptureCmd(),
 		newServeCmd(),
+		newSyncCmd(),
+		newSettingsCmd(),
+		newUpdateCmd(),
 		withRun(leaf("status", "Show login, organisation, Project, gates, capture health and agent integrations", cobra.NoArgs), runStatus),
 		newAgentsCmd(),
 		newHooksCmd(),
@@ -43,6 +56,32 @@ func newRootCmd() *cobra.Command {
 		newMCPBridgeCmd(),
 	)
 	return root
+}
+
+// splashGroups orders the splash's command list.
+var splashGroups = []struct {
+	title string
+	cmds  []string
+}{
+	{"Start", []string{"login", "init", "status", "settings"}},
+	{"Agents", []string{"agents", "sync"}},
+	{"Memory and capture", []string{"memory", "capture"}},
+	{"Account", []string{"whoami", "org", "logout", "update"}},
+}
+
+// splash is `atlas` alone on a terminal.
+func splash(cmd *cobra.Command) {
+	groups := map[string][]tui.Command{}
+	var order []string
+	for _, g := range splashGroups {
+		order = append(order, g.title)
+		for _, name := range g.cmds {
+			if c, _, err := cmd.Find([]string{name}); err == nil && c != cmd {
+				groups[g.title] = append(groups[g.title], tui.Command{Name: name, Short: c.Short})
+			}
+		}
+	}
+	tui.Splash(cmd.OutOrStdout(), version, groups, order)
 }
 
 // leaf builds a stub command with the given argument rule.
@@ -95,6 +134,10 @@ func newInitCmd() *cobra.Command {
 	c.Flags().String("visibility", "org", "who sees a new Project: org or restricted")
 	c.Flags().Bool("local", false, "bind locally only; nothing is synced")
 	c.Flags().Bool("yes", false, "do not prompt for confirmation")
+	c.Flags().StringSlice("agents", nil, "hook these agents (comma-separated ids, atlas agents list); skips the agent step")
+	c.Flags().Bool("all-agents", false, "hook every agent detected on this machine; skips the agent step")
+	c.Flags().String("sync", "", "background sync: on or off (atlas sync); skips the sync step")
+	c.MarkFlagsMutuallyExclusive("agents", "all-agents")
 	c.MarkFlagsMutuallyExclusive("project", "create")
 	c.MarkFlagsMutuallyExclusive("local", "project")
 	c.MarkFlagsMutuallyExclusive("local", "create")
@@ -107,6 +150,7 @@ func newMemoryCmd() *cobra.Command {
 		withRun(leaf("disable", "Turn shared memory off for this repository", cobra.NoArgs), runMemoryGate(false)),
 		withRun(leaf("verify", "Verify the memory revision hash chain", cobra.NoArgs), runMemoryVerify),
 		withRun(leaf("browse", "Browse shared memory: entries by kind, search, history", cobra.NoArgs), runMemoryBrowse),
+		newMemoryIndexCmd(),
 		newMemoryListCmd(),
 		withRun(leaf("export <dir>", "Export durable memories as an Agent Memory Repo (MEMORY.md and one file per kind)", cobra.ExactArgs(1)), runMemoryExport),
 		withRun(leaf("import <file-or-dir>", "Import Agent Memory Repo files as candidate memories", cobra.ExactArgs(1)), runMemoryImport),
@@ -126,7 +170,7 @@ func newCaptureCmd() *cobra.Command {
 func newServeCmd() *cobra.Command {
 	c := withRun(leaf("serve", "Run the Project's listener: memory server, sync drain, and the receiver of agent hooks", cobra.NoArgs), runServe)
 	c.Flags().Bool("daemon", false, "start the listener detached")
-	c.Flags().Bool("stop", false, "stop a detached listener")
+	c.Flags().Bool("stop", false, "stop a detached listener (atlas sync off also keeps hooks from restarting it)")
 	c.Flags().Duration("import-every", 0, "ACP import of native sessions this often (parked; 0: never)")
 	_ = c.Flags().MarkHidden("import-every")
 	c.MarkFlagsMutuallyExclusive("daemon", "stop")

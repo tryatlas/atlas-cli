@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
 	"github.com/tryatlas/atlas-cli/internal/capture/record"
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 )
@@ -579,5 +580,45 @@ func TestACommitMadeDuringTheTurnGetsItsCheckpoint(t *testing.T) {
 		if live != 0 {
 			t.Fatalf("perEvent=%v: the late touch must be consumed by the commit it linked to", perEvent)
 		}
+	}
+}
+
+func TestCommittingAFileWrittenBeforeTheTurnGetsItsCheckpoint(t *testing.T) {
+	root := gitRepo(t)
+	st := enabledStore(t, root)
+	transcript := filepath.Join(t.TempDir(), "s.jsonl")
+	_ = os.WriteFile(transcript, nil, 0o600)
+	// greet.js was written earlier (another session, or by hand) and is
+	// untracked when the turn starts; the agent only stages and commits it.
+	_ = os.WriteFile(filepath.Join(root, "greet.js"), []byte("hi\n"), 0o644)
+	d := &Dispatcher{Root: root, Version: "test", Now: time.Now, Deliver: Deliver("test", nil)}
+	sess := map[string]any{"Session": "s-g", "Transcript": transcript}
+	runHook(t, d, "start", sess)
+	runHook(t, d, "prompt", map[string]any{"Session": "s-g", "Transcript": transcript, "Prompt": "commit greet.js"})
+	shell := func(id, cmd string) {
+		args, _ := json.Marshal(map[string]string{"command": cmd})
+		runHook(t, d, "tool", map[string]any{"Session": "s-g", "Transcript": transcript,
+			"Tool": &record.Tool{NativeID: id, Name: "Bash", Arguments: args, Status: "completed"}})
+	}
+	// The agent reads the file first: a read explains no change.
+	readArgs, _ := json.Marshal(map[string]string{"filePath": filepath.Join(root, "greet.js")})
+	runHook(t, d, "tool", map[string]any{"Session": "s-g", "Transcript": transcript,
+		"Tool": &record.Tool{NativeID: "r", Name: "read", Arguments: readArgs, Locations: []string{filepath.Join(root, "greet.js")}, Status: "completed"}})
+	gitIn(t, root, "add", "greet.js")
+	shell("a", "git add greet.js")
+	gitIn(t, root, "commit", "-q", "-m", "feat: greet")
+	// git's post-commit hook walks the commit before the agent's tool hook
+	// reports the command.
+	if _, err := gitlink.Link(context.Background(), st, root, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	shell("c", `git commit -m "feat: greet"`)
+	f, _ := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	_, _ = f.WriteString(`{"kind":"text","body":"Committed."}` + "\n")
+	_ = f.Close()
+	runHook(t, d, "stop", sess)
+	var files string
+	if err := st.DB().QueryRow(`SELECT files_touched FROM checkpoint`).Scan(&files); err != nil || !strings.Contains(files, "greet.js") {
+		t.Fatalf("checkpoint files = %q %v", files, err)
 	}
 }

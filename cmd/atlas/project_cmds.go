@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/tryatlas/atlas-cli/internal/auth"
@@ -25,7 +27,8 @@ import (
 // Seams replaced in tests.
 var (
 	interactive = tui.Interactive
-	choose      = tui.Select
+	chooseStep  = tui.StepSelect
+	chooseMany  = tui.StepMulti
 	now         = time.Now
 )
 
@@ -34,10 +37,11 @@ const lockedHelp = "another Atlas window is recording this Project; close the fo
 
 func runInit(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
-	out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	errOut := cmd.ErrOrStderr()
 	flags := cmd.Flags()
 	local, _ := flags.GetBool("local")
 	yes, _ := flags.GetBool("yes")
+	guided := interactive() && !yes
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -48,6 +52,12 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	scope := project.ScopeRoot(ctx, launch)
+	if guided {
+		tui.Animate(cmd.OutOrStdout(), func(t float64) string {
+			return lipgloss.JoinHorizontal(lipgloss.Center, tui.Logo(t), "   ",
+				tui.Default.Bold.Render("Set up Atlas")+"\n"+tui.Default.Faint.Render(launch)) + "\n"
+		})
+	}
 
 	if launch != scope {
 		fmt.Fprintf(errOut, "Note: %s is inside the repository %s.\n"+
@@ -64,13 +74,46 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		if a, err = newAuth(); err != nil {
 			return err
 		}
-		if sess, err = a.Refresh(ctx); errors.Is(err, auth.ErrSignedOut) {
-			return err
-		} else if sess == nil {
+		sess, err = a.Refresh(ctx)
+		if errors.Is(err, auth.ErrSignedOut) && guided {
+			i, cerr := chooseStep(tui.Step{Title: "Account"}, "You are not signed in to Atlas.", []tui.Choice{
+				{Label: "Sign in", Detail: "opens the browser; sessions and memory sync to a cloud Project"},
+				{Label: "Set up locally", Detail: "nothing leaves this machine"},
+			}, 0)
+			if cerr != nil {
+				return cerr
+			}
+			if i == 1 {
+				local = true
+			} else {
+				if err := runLogin(cmd, nil); err != nil {
+					return err
+				}
+				sess, err = a.Refresh(ctx)
+			}
+		}
+		if !local && sess == nil {
 			return err
 		}
 	}
+	steps := initSteps(local)
 
+	if err := bindFolder(cmd, a, sess, local, launch, scope, steps); err != nil {
+		return err
+	}
+	ensureMemoryRecord(scope)
+	return finishInit(cmd, launch, local, guided, steps)
+}
+
+// bindFolder writes the binding under the writer lock and lets it go.
+func bindFolder(cmd *cobra.Command, a *auth.Auth, sess *auth.Session, local bool, launch, scope string, steps initStepper) error {
+	ctx := cmd.Context()
+	out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	yes, _ := cmd.Flags().GetBool("yes")
+	guided := interactive() && !yes
+	if guided {
+		out = tui.Indent(out) // inside the steps' tree
+	}
 	lock, err := store.Lock(launch)
 	if errors.Is(err, store.ErrLocked) {
 		return errors.New(lockedHelp)
@@ -105,16 +148,20 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		if err := st.PutBinding(ctx, b, now()); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "Bound %s locally. Nothing is synced.\n", launch)
+		if guided {
+			tui.StepDone(cmd.OutOrStdout(), tui.Step{Title: "Project"}, "local · nothing is synced")
+		} else {
+			fmt.Fprintf(out, "Bound %s locally. Nothing is synced.\n", launch)
+		}
 		return nil
 	}
 
-	org, err := pickOrg(cmd, sess)
+	org, err := pickOrg(cmd, sess, steps.step("Organisation"))
 	if err != nil {
 		return err
 	}
 	ic := ingest.New(hosts.Ingest(), a.Tokens())
-	ws, how, err := pickProject(cmd, ic, org, launch, fp)
+	ws, how, err := pickProject(cmd, ic, org, launch, fp, steps.step("Project"))
 	if err != nil {
 		return err
 	}
@@ -128,11 +175,25 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if err := st.BindCloud(ctx, b, now()); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Bound %s to %s / %s (%s).\n", launch, org.Name, ws.Label(), how)
+	if !guided { // on a terminal the Project step's line says it
+		fmt.Fprintf(out, "Bound %s to %s / %s (%s).\n", launch, org.Name, ws.Label(), how)
+	}
 	if launch != scope {
 		fmt.Fprintf(out, "Shared memory for this folder lives at %s.\n", filepath.Join(scope, ".atlas", "memory"))
 	}
 	return nil
+}
+
+// ensureMemoryRecord creates <scope>/.atlas/memory/memory.sqlite when shared
+// memory is on, so a bound folder has its record from the start (the app
+// creates it on the first session; an empty record changes nothing).
+func ensureMemoryRecord(scope string) {
+	if !project.MemorySharing(scope) {
+		return
+	}
+	if st, err := record.Open(scope, true); err == nil {
+		_ = st.Close()
+	}
 }
 
 // confirm asks a yes/no question; without a terminal, --yes is required.
@@ -151,7 +212,7 @@ func confirm(cmd *cobra.Command, yes bool, question string) error {
 	return tui.ErrCancelled
 }
 
-func pickOrg(cmd *cobra.Command, s *auth.Session) (auth.Org, error) {
+func pickOrg(cmd *cobra.Command, s *auth.Session, step tui.Step) (auth.Org, error) {
 	want, _ := cmd.Flags().GetString("org")
 	var orgs []auth.Org
 	if s.Identity != nil && s.Identity.Orgs != nil {
@@ -163,35 +224,46 @@ func pickOrg(cmd *cobra.Command, s *auth.Session) (auth.Org, error) {
 	if want != "" {
 		for _, o := range orgs {
 			if o.ID == want {
+				stepDone(cmd, step, o.Name)
 				return o, nil
 			}
 		}
 		return auth.Org{}, fmt.Errorf("%s is not one of your organisations (atlas org list)", want)
 	}
 	if len(orgs) == 1 {
+		stepDone(cmd, step, orgs[0].Name+" (your only organisation)")
 		return orgs[0], nil
 	}
 	if !interactive() {
 		return auth.Org{}, errors.New("you belong to several organisations; pass --org <id> (atlas org list)")
 	}
-	labels := make([]string, len(orgs))
+	choices := make([]tui.Choice, len(orgs))
 	initial := 0
 	for i, o := range orgs {
-		labels[i] = fmt.Sprintf("%s (%s)", o.Name, o.ID)
+		choices[i] = tui.Choice{Label: o.Name, Detail: o.ID}
 		if o.ID == s.ActiveOrgID() {
 			initial = i
+			choices[i].Detail += " · active"
 		}
 	}
-	i, err := choose("Which organisation?", labels, initial)
+	i, err := chooseStep(step, "Which organisation should this folder belong to?", choices, initial)
 	if err != nil {
 		return auth.Org{}, err
 	}
 	return orgs[i], nil
 }
 
+// stepDone prints an answered step on a terminal; scripts get the summary
+// line only.
+func stepDone(cmd *cobra.Command, step tui.Step, answer string) {
+	if interactive() {
+		tui.StepDone(cmd.OutOrStdout(), step, answer)
+	}
+}
+
 // pickProject chooses the cloud Project: an explicit --project, a new one with
 // --create, else the server's fingerprint match, else a choice from the list.
-func pickProject(cmd *cobra.Command, ic *ingest.Client, org auth.Org, launch string, fp project.GitFingerprint) (ingest.Workspace, string, error) {
+func pickProject(cmd *cobra.Command, ic *ingest.Client, org auth.Org, launch string, fp project.GitFingerprint, step tui.Step) (ingest.Workspace, string, error) {
 	ctx := cmd.Context()
 	flags := cmd.Flags()
 	explicit, _ := flags.GetString("project")
@@ -214,10 +286,19 @@ func pickProject(cmd *cobra.Command, ic *ingest.Client, org auth.Org, launch str
 
 	switch {
 	case explicit != "":
-		return connect(explicit, nil)
+		ws, how, err := connect(explicit, nil)
+		if err == nil {
+			stepDone(cmd, step, ws.Label())
+		}
+		return ws, how, err
 	case create:
-		return createProject(cmd, ic, org, launch, fp)
+		ws, how, err := createProject(cmd, ic, org, launch, fp)
+		if err == nil {
+			stepDone(cmd, step, ws.Label()+" (new)")
+		}
+		return ws, how, err
 	}
+	newLabel := tui.Choice{Label: "+ Create a new Project", Detail: "“" + defaultSlug(cmd, launch) + "”"}
 
 	if fp.RootCommitSHA != nil || fp.GitURL != nil {
 		res, err := ic.Connect(ctx, ingest.ConnectRequest{OrgID: org.ID, RootCommitSHA: fp.RootCommitSHA, GitURL: fp.GitURL})
@@ -226,12 +307,37 @@ func pickProject(cmd *cobra.Command, ic *ingest.Client, org auth.Org, launch str
 		}
 		switch res.Status {
 		case "connected":
-			return ingest.Workspace{ID: res.WorkspaceID, Slug: deref(res.Slug)}, "matched by " + res.Reason, nil
+			matched := ingest.Workspace{ID: res.WorkspaceID, Slug: deref(res.Slug)}
+			if !interactive() {
+				return matched, "matched by " + res.Reason, nil
+			}
+			// Offer the match first, the org's other Projects after it.
+			list, _ := ic.Workspaces(ctx, org.ID)
+			opts := []ingest.Workspace{matched}
+			for _, w := range list {
+				if w.ID == matched.ID {
+					opts[0] = w
+				} else {
+					opts = append(opts, w)
+				}
+			}
+			choices := workspaceChoices(opts)
+			choices[0].Detail = "matches this repository (" + res.Reason + ")"
+			i, err := chooseStep(step, "Which Project in "+org.Name+"?", append(choices, newLabel), 0)
+			switch {
+			case err != nil:
+				return ingest.Workspace{}, "", err
+			case i == 0:
+				return opts[0], "matched by " + res.Reason, nil
+			case i == len(opts):
+				return createProject(cmd, ic, org, launch, fp)
+			}
+			return connect(opts[i].ID, &opts[i].Slug)
 		case "ambiguous":
 			if !interactive() {
 				return ingest.Workspace{}, "", fmt.Errorf("several Projects match this repository (%s); pass --project <id>", workspaceList(res.Candidates))
 			}
-			i, err := choose("Several Projects match this repository. Which one?", workspaceLabels(res.Candidates), 0)
+			i, err := chooseStep(step, "Several Projects in "+org.Name+" match this repository. Which one?", workspaceChoices(res.Candidates), 0)
 			if err != nil {
 				return ingest.Workspace{}, "", err
 			}
@@ -250,8 +356,7 @@ func pickProject(cmd *cobra.Command, ic *ingest.Client, org auth.Org, launch str
 		}
 		return ingest.Workspace{}, "", fmt.Errorf("no Project matches this repository; pass --project <id> (%s) or --create", workspaceList(list))
 	}
-	newLabel := fmt.Sprintf("Create a new Project “%s”", defaultSlug(cmd, launch))
-	i, err := choose("Which Project in "+org.Name+"?", append(workspaceLabels(list), newLabel), len(list))
+	i, err := chooseStep(step, "Which Project in "+org.Name+"?", append(workspaceChoices(list), newLabel), len(list))
 	if err != nil {
 		return ingest.Workspace{}, "", err
 	}
@@ -296,6 +401,14 @@ func workspaceLabels(ws []ingest.Workspace) []string {
 	out := make([]string, len(ws))
 	for i, w := range ws {
 		out[i] = fmt.Sprintf("%s (%s)", w.Label(), w.ID)
+	}
+	return out
+}
+
+func workspaceChoices(ws []ingest.Workspace) []tui.Choice {
+	out := make([]tui.Choice, len(ws))
+	for i, w := range ws {
+		out[i] = tui.Choice{Label: w.Label(), Detail: w.ID}
 	}
 	return out
 }
@@ -361,7 +474,7 @@ func runMemoryGate(enabled bool) func(*cobra.Command, []string) error {
 		if enabled {
 			state = "on"
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Shared memory is %s for %s.\n", state, dir)
+		tui.Done(cmd.OutOrStdout(), fmt.Sprintf("Shared memory is %s for %s.", state, dir))
 		return nil
 	}
 }
@@ -393,9 +506,9 @@ func runCaptureGate(enabled bool) func(*cobra.Command, []string) error {
 			return err
 		}
 		if enabled {
-			fmt.Fprintf(cmd.OutOrStdout(), "Capture is on for %s.\n", p.Root)
+			tui.Done(cmd.OutOrStdout(), fmt.Sprintf("Capture is on for %s.", p.Root))
 		} else {
-			fmt.Fprintf(cmd.OutOrStdout(), "Capture is paused for %s. What was recorded still syncs.\n", p.Root)
+			tui.Done(cmd.OutOrStdout(), fmt.Sprintf("Capture is paused for %s. What was recorded still syncs.", p.Root))
 		}
 		return nil
 	}
@@ -404,8 +517,19 @@ func runCaptureGate(enabled bool) func(*cobra.Command, []string) error {
 // ── Status ───────────────────────────────────────────────────────────────────
 
 func runStatus(cmd *cobra.Command, _ []string) error {
+	if !interactive() {
+		return statusLines(cmd, cmd.OutOrStdout())
+	}
+	var buf bytes.Buffer
+	err := statusLines(cmd, &buf)
+	renderStatus(cmd.OutOrStdout(), buf.String())
+	return err
+}
+
+// statusLines prints "Label:     value" lines, one fact each; on a terminal
+// renderStatus draws them as a card.
+func statusLines(cmd *cobra.Command, w io.Writer) error {
 	ctx := cmd.Context()
-	w := cmd.OutOrStdout()
 	var sess *auth.Session
 	if a, err := newAuth(); err == nil {
 		if s, err := a.Session(); err == nil {
@@ -461,6 +585,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	}
 	printCaptureHealth(ctx, w, st, p.Root, b)
 	printMemoryHealth(ctx, w, p.ScopeRoot)
+	printSync(w, p.Root)
 	printAgents(ctx, w, p.Root)
 	return nil
 }

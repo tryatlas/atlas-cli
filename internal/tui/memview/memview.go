@@ -161,57 +161,72 @@ func clip(s string, w int) string {
 	return string(r[:w-1]) + "…"
 }
 
-// View draws the list and the selected entry side by side.
+// tabs are the kinds, the current one on the highlight bar.
+func (m *Model) tabs() string {
+	var out []string
+	for i, k := range Kinds {
+		if i == m.kind {
+			out = append(out, th.Highlight.Render(" "+label(k)+" "))
+		} else {
+			out = append(out, th.Faint.Render(" "+label(k)+" "))
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+// View draws a breadcrumb and the kind tabs, the entries and the selected
+// entry in two panels, and the keys.
 func (m *Model) View() tea.View {
 	if m.width == 0 {
 		return tea.NewView("")
 	}
-	var tabs []string
-	for i, k := range Kinds {
-		if i == m.kind {
-			tabs = append(tabs, th.Selected.Render("["+label(k)+"]"))
-		} else {
-			tabs = append(tabs, th.Faint.Render(label(k)))
-		}
-	}
-	head := th.Title.Render("Shared memory · "+m.title) + "\n" + strings.Join(tabs, " ")
+	W := m.width
+	left := tui.Header2("memory", label(Kinds[m.kind]))
+	right := th.Faint.Render(clip(m.title, W/2))
+	head := left + strings.Repeat(" ", max(W-lipgloss.Width(left)-lipgloss.Width(right), 1)) + right
+	head += "\n" + tui.Rule(W) + "\n" + m.tabs()
 	if m.searching || m.query != "" {
-		head += "\n" + th.BarKey.Render("search ") + m.query
+		q := m.query
 		if m.searching {
-			head += "▏"
+			q += "▏"
 		}
+		head += "   " + tui.Upper("search") + " " + q
 	}
-	listW := m.width * 2 / 5
-	bodyH := m.height - lipgloss.Height(head) - 2
+	bodyH := max(m.height-lipgloss.Height(head)-2, 6)
+	listW := W * 2 / 5
+	rows := bodyH - 2
 	if m.cursor < m.top {
 		m.top = m.cursor
 	}
-	if m.cursor >= m.top+bodyH {
-		m.top = m.cursor - bodyH + 1
+	if m.cursor >= m.top+rows {
+		m.top = m.cursor - rows + 1
 	}
 	var list []string
-	for i := m.top; i < len(m.entries) && i < m.top+bodyH; i++ {
+	for i := m.top; i < len(m.entries) && i < m.top+rows; i++ {
 		e := m.entries[i]
-		line := fmt.Sprintf("%-12s %s", label(e.Kind), clip(e.Content, listW-16))
+		kind := th.Accent.Render(fmt.Sprintf("%-12s", label(e.Kind)))
+		text := clip(e.Content, listW-20)
 		if e.State == record.StateCandidate {
-			line = th.Faint.Render(line)
+			text = th.Faint.Render(text)
 		}
 		if i == m.cursor {
-			list = append(list, th.Selected.Render("› "+line))
+			list = append(list, th.Tree.Render("▸")+kind+th.Highlight.Render(" "+text+" "))
 		} else {
-			list = append(list, "  "+line)
+			list = append(list, " "+kind+" "+text)
 		}
 	}
 	if len(m.entries) == 0 {
-		list = append(list, th.Faint.Render("  nothing here"))
+		list = append(list, th.Faint.Render("nothing here"))
 	}
-	left := lipgloss.NewStyle().Width(listW).Height(bodyH).Render(strings.Join(list, "\n"))
-	right := lipgloss.NewStyle().Width(m.width - listW - 2).Height(bodyH).PaddingLeft(2).Render(m.detail(m.width - listW - 4))
-	foot := th.Hint.Render("↑/↓ move · tab kind · / search · h history · q quit")
+	count := fmt.Sprintf("Entries · %d", len(m.entries))
+	panels := lipgloss.JoinHorizontal(lipgloss.Top,
+		tui.Panel(count, strings.Join(list, "\n"), listW, bodyH, true), " ",
+		tui.Panel("Entry", m.detail(W-listW-5), W-listW-1, bodyH, false))
+	foot := tui.Keys("↑↓", "navigate", "TAB", "kind", "/", "search", "H", "history", "Q", "quit")
 	if m.err != nil {
-		foot = th.Error.Render(m.err.Error())
+		foot = th.Error.Render("✗ " + m.err.Error())
 	}
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, head, lipgloss.JoinHorizontal(lipgloss.Top, left, right), foot))
+	v := tea.NewView(head + "\n" + panels + "\n" + tui.Rule(W) + "\n" + foot)
 	v.AltScreen = true
 	return v
 }
@@ -223,7 +238,7 @@ func (m *Model) detail(w int) string {
 	}
 	wrap := lipgloss.NewStyle().Width(w)
 	var b strings.Builder
-	b.WriteString(th.Bold.Render(label(e.Kind)) + "  " + th.Faint.Render(fmt.Sprintf("#%d · rev %d · %s", e.ID, e.Rev, strings.TrimSpace(e.State+" "+e.Status))) + "\n\n")
+	b.WriteString(tui.Tag(strings.ToUpper(label(e.Kind)), th.TagRun) + "  " + th.Faint.Render(fmt.Sprintf("#%d · rev %d · %s", e.ID, e.Rev, strings.TrimSpace(e.State+" "+e.Status))) + "\n\n")
 	b.WriteString(wrap.Render(e.Content) + "\n\n")
 	meta := [][2]string{
 		{"by", e.By()}, {"session", e.Session}, {"key", e.Key}, {"confidence", fmt.Sprintf("%.2f", e.Confidence)},
@@ -231,7 +246,7 @@ func (m *Model) detail(w int) string {
 	}
 	for _, kv := range meta {
 		if kv[1] != "" {
-			b.WriteString(th.BarKey.Render(fmt.Sprintf("%-11s", kv[0])) + kv[1] + "\n")
+			b.WriteString(tui.Upper(fmt.Sprintf("%-11s", kv[0])) + kv[1] + "\n")
 		}
 	}
 	for _, c := range e.Evidence {
@@ -239,10 +254,10 @@ func (m *Model) detail(w int) string {
 		if c.Symbol != nil {
 			ev += " " + *c.Symbol
 		}
-		b.WriteString(th.Location.Render("evidence   "+ev) + "\n")
+		b.WriteString(tui.Upper("evidence   ") + th.Location.Render(ev) + "\n")
 	}
 	if m.showHist {
-		b.WriteString("\n" + th.Bold.Render("History") + "\n")
+		b.WriteString("\n" + tui.Upper("history") + "\n")
 		for _, r := range m.history {
 			b.WriteString(th.Faint.Render(fmt.Sprintf("rev %d · %s · %s · %s", r.Rev, r.Op, r.By(), when(r.At))) + "\n")
 			b.WriteString(wrap.Render("  "+clip(r.Content, w*3)) + "\n")

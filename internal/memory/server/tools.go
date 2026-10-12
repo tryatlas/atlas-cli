@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/tryatlas/atlas-cli/internal/memory/corpus"
 	"github.com/tryatlas/atlas-cli/internal/memory/record"
 	"github.com/tryatlas/atlas-cli/internal/project"
 )
@@ -361,12 +365,71 @@ func (t *call) search(args json.RawMessage) (any, error) {
 	entries := []any{}
 	for _, x := range list {
 		m := t.entryJSON(x.h.Entry, srcs[x.h.Entry.ID], x.ev)
+		why := map[string]any{}
 		if x.h.BM25 > 0 {
-			m["why"] = map[string]any{"bm25": x.h.BM25}
+			why["bm25"] = x.h.BM25
+		}
+		if x.h.Dense > 0 {
+			why["dense"] = x.h.Dense
+		}
+		if len(why) > 0 {
+			m["why"] = why
 		}
 		entries = append(entries, m)
 	}
-	return map[string]any{"entries": entries, "documents": []any{}}, nil
+	documents := []any{}
+	if len(a.Kinds) == 0 {
+		docLimit := indexDefault
+		if a.Limit != nil {
+			docLimit = min(max(*a.Limit, 1), indexMax)
+		}
+		for _, d := range t.documents(a.Query, docLimit) {
+			documents = append(documents, map[string]any{"title": d.Title, "source": d.Source, "text": d.Text})
+		}
+	}
+	return map[string]any{"entries": entries, "documents": documents}, nil
+}
+
+// How many indexed documents memory_search adds (tools.rs INDEX_*_LIMIT).
+const (
+	indexDefault = 6
+	indexMax     = 20
+)
+
+// documents is the index leg of memory_search: the project's corpus, best
+// effort (no index, no model: BM25 only or nothing). A shared memory's
+// document is returned only while its entry still exists.
+func (t *call) documents(query string, limit int) []corpus.Result {
+	root := t.g.Cwd
+	if p, err := project.Discover(t.ctx, t.g.Cwd); err == nil {
+		root = p.Root
+	}
+	ix, err := corpus.Open(root, false)
+	if err != nil {
+		return nil
+	}
+	defer ix.Close()
+	var qvec []float32
+	if src := record.Vectors(); src != nil {
+		qvec = src.Embed(query) // untrimmed, as the app's retrieve
+	}
+	live := func(id string) bool {
+		rest, ok := strings.CutPrefix(id, "shared:")
+		if !ok {
+			return true
+		}
+		_, num, _ := strings.Cut(rest, ":")
+		n, err := strconv.ParseInt(num, 10, 64)
+		if err != nil {
+			return false
+		}
+		e, err := t.st.Get(t.ctx, n)
+		return err == nil && e != nil
+	}
+	ctx, cancel := context.WithTimeout(t.ctx, 6*time.Second)
+	defer cancel()
+	res, _ := ix.Retrieve(ctx, query, qvec, limit, live)
+	return res
 }
 
 // ── memory_get, memory_list, memory_history ──────────────────────────────────
@@ -663,9 +726,21 @@ func (t *call) forget(args json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	before, _ := t.st.Get(t.ctx, id)
 	ok, err := t.st.Forget(t.ctx, id, t.g.SessionID, t.s.now())
 	if err != nil {
 		return nil, err
+	}
+	if ok && before != nil {
+		// Its document leaves the index now, not at the next pass.
+		root := t.g.Cwd
+		if p, err := project.Discover(t.ctx, t.g.Cwd); err == nil {
+			root = p.Root
+		}
+		if ix, err := corpus.Open(root, false); err == nil {
+			_ = ix.Delete(t.ctx, fmt.Sprintf("shared:%s:%d", before.Kind, id))
+			_ = ix.Close()
+		}
 	}
 	return map[string]any{"forgotten": ok, "id": id}, nil
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 func TestMain(m *testing.M) {
 	dir, _ := os.MkdirTemp("", "atlas-state-")
 	_ = os.Setenv("XDG_STATE_HOME", dir)
+	_ = os.Setenv("ATLAS_MODELS_DIR", dir) // no model: deterministic
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
@@ -101,6 +103,27 @@ func TestExtractGatesAndWrites(t *testing.T) {
 	// Nothing new since: skipped.
 	if _, err := Run(ctx, o); !errors.Is(err, ErrSkipped) {
 		t.Fatalf("repeat = %v", err)
+	}
+	// Progress is kept where and how the desktop keeps it.
+	b, err := os.ReadFile(filepath.Join(root, ".atlas", "memory", "extract-state", "s-x.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(b, &got)
+	if got["last_extracted_turn_index"] != float64(3) || got["tool_calls_since_last"] != float64(0) || got["extraction_count"] != float64(1) {
+		t.Fatalf("state = %s", b)
+	}
+	// An unknown session is skipped, not an error.
+	o.Session = "not-captured"
+	if _, err := Run(ctx, o); !errors.Is(err, ErrSkipped) {
+		t.Fatalf("unknown session = %v", err)
+	}
+}
+
+func TestSanitizeMatchesTheDesktop(t *testing.T) {
+	if got := sanitize("ses_ab/c:d.é-1"); got != "ses_ab_c_d__-1" {
+		t.Fatal(got)
 	}
 }
 
