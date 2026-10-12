@@ -33,7 +33,7 @@ func TestPiWriter(t *testing.T) {
 	}
 	b, _ := os.ReadFile(w.Path(root))
 	s := string(b)
-	for _, want := range []string{`"atlas_memory"`, `"command": "atlas"`, `"mcp-bridge"`, `"--agent"`, `"pi-acp"`, `"mine"`} {
+	for _, want := range []string{`"atlas_memory"`, `"command": "atlas"`, `"mcp-bridge"`, `"--agent"`, `"pi"`, `"mine"`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("file lacks %s:\n%s", want, s)
 		}

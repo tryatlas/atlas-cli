@@ -53,7 +53,7 @@ func TestCopilotWriterWritesALocalServerAndKeepsTheRest(t *testing.T) {
 	if !ok || e.Type != "local" || e.Command != "atlas" || len(e.Tools) != 1 || e.Tools[0] != "*" {
 		t.Fatalf("%s", b)
 	}
-	if want := []string{"mcp-bridge", "--project", root, "--agent", "github-copilot-cli"}; len(e.Args) != len(want) || e.Args[2] != root || e.Args[4] != "github-copilot-cli" {
+	if want := []string{"mcp-bridge", "--project", root, "--agent", "copilot"}; len(e.Args) != len(want) || e.Args[2] != root || e.Args[4] != "copilot" {
 		t.Fatalf("args %v", e.Args)
 	}
 	if _, ok := file.Servers["github"]; !ok || file.Other != 1 {

@@ -137,23 +137,3 @@ const (
 type Noter interface {
 	AddNote() string
 }
-
-// registryIDs map a hook integration to the id the desktop records the same
-// agent under (its ACP registry id), so a session run in the agent's own UI
-// and one run in the app are one agent in the store and in memory.
-var registryIDs = map[string]string{
-	"claude-code": "claude-acp",
-	"codex":       "codex-acp",
-	"copilot":     "github-copilot-cli",
-	"droid":       "factory-droid",
-	"pi":          "pi-acp",
-	"antigravity": "antigravity-acp",
-}
-
-// RegistryID is the desktop's id for a hook integration's agent.
-func RegistryID(id string) string {
-	if r, ok := registryIDs[id]; ok {
-		return r
-	}
-	return id
-}

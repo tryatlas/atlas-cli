@@ -98,7 +98,7 @@ func runAgentHook(a hooks.Agent, verb string) func(*cobra.Command, []string) err
 			_, _ = cmd.OutOrStdout().Write(out)
 		}
 		if err == nil && (ev.Kind == hooks.TurnEnd || ev.Kind == hooks.SessionEnd) {
-			spawnExtract(p.Root, hooks.RegistryID(a.ID()), ev.SessionID, ev.Kind == hooks.SessionEnd)
+			spawnExtract(p.Root, a.ID(), ev.SessionID, ev.Kind == hooks.SessionEnd)
 		}
 		return nil
 	}

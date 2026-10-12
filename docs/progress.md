@@ -1291,11 +1291,8 @@ Reported: app memory and terminal memory differ. Both use the same file
 list` matched the app's active entries; the difference was in what each
 side writes for a session. Fixed:
 
-- **Agent ids.** Hook sessions were recorded as `claude-code`, `codex`, …;
-  the app records the same agents under their registry ids. Sessions,
-  memory entries and the MCP bridge now use `claude-acp`, `codex-acp`,
-  `github-copilot-cli`, `factory-droid`, `pi-acp`, `antigravity-acp`
-  (`cursor`, `opencode` unchanged).
+- **Agent ids.** (Reverted in 0.3.4 at the user's request: agents keep
+  their own names.)
 - **Capture candidates.** Lines of the agent's reply carrying the app's
   markers (`decided to`, `decision:`, `gotcha:`, `doesn't work`, `note:`,
   `architecture:`, …) become candidates (source `capture`, 0.3).
@@ -1315,3 +1312,12 @@ Verified live (`claude -p` in a fresh Project): `file_changed`, two capture
 candidates, three extractor memories ~40 s later, the handoff with the
 distilled decision and fact, everything as `claude-acp`; in this repo
 `atlas memory list --all` = 202 = the app's store.
+
+## v0.3.4: agents keep their own names
+
+At the user's request the agent renaming of v0.3.3 is reverted: hook
+sessions, memory entries, handoff notes and the MCP bridge use the
+integration's own id (`claude-code`, `codex`, `cursor`, `copilot`,
+`opencode`, `droid`, `antigravity`, `pi`). Candidates, handoff notes and the
+extractor stay. Sessions recorded by 0.3.3 keep the names they were written
+with.

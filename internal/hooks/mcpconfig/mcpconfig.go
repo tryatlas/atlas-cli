@@ -15,10 +15,9 @@ import (
 // ServerName is the entry's key: the desktop's server name.
 const ServerName = "atlas_memory"
 
-// Args are the bridge arguments for a Project and agent; the agent is named
-// by the desktop's registry id, as its memory entries are.
+// Args are the bridge arguments for a Project and agent.
 func Args(root, agentID string) []string {
-	return []string{"mcp-bridge", "--project", root, "--agent", hooks.RegistryID(agentID)}
+	return []string{"mcp-bridge", "--project", root, "--agent", agentID}
 }
 
 // Writer edits one agent's MCP config.

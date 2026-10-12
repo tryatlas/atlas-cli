@@ -85,7 +85,7 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 	if ev.Model != "" {
 		st.Model = ev.Model
 	}
-	sess := record.Session{Agent: RegistryID(a.ID()), NativeID: ev.SessionID, Cwd: d.Root, Model: st.Model}
+	sess := record.Session{Agent: a.ID(), NativeID: ev.SessionID, Cwd: d.Root, Model: st.Model}
 	if !st.Started && ev.Kind != SessionEnd {
 		// The first hook of a session, whichever it is, announces it.
 		st.Started = true
