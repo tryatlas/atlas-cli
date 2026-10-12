@@ -28,7 +28,7 @@
 
 ---
 
-`atlas` is the headless Atlas: one Go binary that signs in like the Atlas
+`Atlas CLI` is the headless Atlas: one Go binary that signs in like the Atlas
 desktop app, binds a folder to an organisation and a cloud Project, and plugs
 into the hooks of the agents you already use. It writes the same files the app
 writes, byte for byte, so a folder works the same whether it is open in the app,
