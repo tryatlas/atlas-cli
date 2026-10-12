@@ -9,7 +9,7 @@ import (
 // Prefs are the CLI's per-Project choices that are not the desktop's
 // (.atlas/ stays the app's).
 type Prefs struct {
-	// BackgroundSync keeps atlas serve running for the Project: atlas sync on
+	// BackgroundSync keeps atlas-cli serve running for the Project: atlas-cli sync on
 	// starts it, and an agent hook restarts it when it is gone.
 	BackgroundSync bool `json:"backgroundSync"`
 }

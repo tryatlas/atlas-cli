@@ -68,6 +68,7 @@ var wantCommands = []string{
 	"settings",
 	"status",
 	"sync",
+	"uninstall",
 	"update",
 	"whoami",
 }
@@ -112,7 +113,7 @@ var implemented = map[string]bool{
 	"memory verify": true, "memory export": true, "memory import": true, "mcp-bridge": true, "serve": true,
 	"capture link": true, "capture sync": true, "acp import": true, "capture retry": true, "acp run": true, "memory browse": true, "memory list": true,
 	"acp check": true, "acp detect": true, "acp install": true, "acp list": true, "acp sessions": true, "acp logout": true, "acp uninstall": true,
-	"settings": true, "sync": true, "update": true, "memory index": true,
+	"settings": true, "sync": true, "update": true, "uninstall": true, "memory index": true,
 	"agents add": true, "agents list": true, "agents remove": true, "agents sessions": true,
 	"hooks extract": true, "hooks git post-commit": true,
 }
@@ -145,7 +146,7 @@ func TestBadArgsAreUsageErrors(t *testing.T) {
 	if code := run([]string{"org", "use"}, &stdout, &stderr); code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
-	if !strings.HasPrefix(stderr.String(), "atlas: ") {
+	if !strings.HasPrefix(stderr.String(), "atlas-cli: ") {
 		t.Fatalf("stderr = %q, want an atlas: error", stderr.String())
 	}
 }
@@ -155,7 +156,7 @@ func TestVersion(t *testing.T) {
 	if code := run([]string{"--version"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if got := stdout.String(); got != "atlas dev\n" {
+	if got := stdout.String(); got != "atlas-cli dev\n" {
 		t.Fatalf("stdout = %q", got)
 	}
 }

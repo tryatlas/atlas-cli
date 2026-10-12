@@ -45,7 +45,7 @@ func TestAntigravityWriter(t *testing.T) {
 		t.Fatalf("user's server lost: %s", b)
 	}
 	ours := file.Servers[ServerName]
-	if ours["command"] != "atlas" || ours["type"] != nil {
+	if ours["command"] != "atlas-cli" || ours["type"] != nil {
 		t.Fatalf("entry = %v", ours)
 	}
 	args, _ := json.Marshal(ours["args"])

@@ -13,7 +13,7 @@ import (
 )
 
 // ErrSignedOut means there is no usable session file.
-var ErrSignedOut = errors.New("not signed in; run atlas login")
+var ErrSignedOut = errors.New("not signed in; run atlas-cli login")
 
 // Auth ties the session file to the auth host.
 type Auth struct {

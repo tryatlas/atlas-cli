@@ -243,7 +243,7 @@ func (im *Importer) conn(ctx context.Context, id string) (*importConn, error) {
 // Run does one pass over the installed agents (or the named ones).
 func (im *Importer) Run(ctx context.Context, only []string, dryRun bool) ([]ImportResult, error) {
 	if im.Host == nil || im.Host.Recorder == nil {
-		return nil, errors.New("capture is not available here (atlas init, or another Atlas window holds the store)")
+		return nil, errors.New("capture is not available here (atlas-cli init, or another Atlas window holds the store)")
 	}
 	installed, _, err := im.Agents.Installed()
 	if err != nil {

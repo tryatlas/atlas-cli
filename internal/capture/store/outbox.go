@@ -221,7 +221,7 @@ func (s *Store) MarkFailed(ctx context.Context, kind Kind, id string) error {
 	return err
 }
 
-// RetryFailed requeues every failed row (atlas capture retry).
+// RetryFailed requeues every failed row (atlas-cli capture retry).
 func (s *Store) RetryFailed(ctx context.Context) (int64, error) {
 	var n int64
 	for _, t := range syncTables {

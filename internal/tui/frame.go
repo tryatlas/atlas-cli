@@ -11,7 +11,7 @@ import (
 // The frame every screen shares: a breadcrumb over a rule, a key line under
 // a rule, titled panels, tags, tree lines and a block progress bar.
 
-// Crumb is "atlas / settings / agents": the path faint, the last part bright.
+// Crumb is "atlas-cli / settings / agents": the path faint, the last part bright.
 func Crumb(parts ...string) string {
 	if len(parts) == 0 {
 		return ""

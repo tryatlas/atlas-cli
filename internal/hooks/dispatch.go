@@ -242,7 +242,7 @@ func (d *Dispatcher) Run(ctx context.Context, a Agent, ev *Event) ([]byte, error
 				_ = d.deliver(ctx, st, Delivery{Root: d.Root, Session: sess, Turn: turn, At: now})
 			}
 		}
-		// The state stays (atlas agents sessions lists it with its resume
+		// The state stays (atlas-cli agents sessions lists it with its resume
 		// command) until Sweep retires it.
 		st.Ended = true
 		if err := st.Save(d.Root); err != nil {

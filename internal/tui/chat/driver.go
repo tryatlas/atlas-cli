@@ -1,4 +1,4 @@
-// Package chat is the atlas run chat screen (ADR-0009 §1): a Bubble Tea v2
+// Package chat is the atlas-cli run chat screen (ADR-0009 §1): a Bubble Tea v2
 // view over one ACP session. It decides everything from what the agent
 // advertises and sends; nothing here looks at an agent id.
 package chat

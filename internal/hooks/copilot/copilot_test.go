@@ -70,7 +70,7 @@ func TestInstallStateUninstall(t *testing.T) {
 		if len(list) != 1 || list[0].Type != "command" {
 			t.Fatalf("%s: %+v", ev, list)
 		}
-		if want := hooks.Wrap("atlas hooks copilot " + verb); list[0].Bash != want {
+		if want := hooks.Wrap("atlas-cli hooks copilot " + verb); list[0].Bash != want {
 			t.Fatalf("%s: %q", ev, list[0].Bash)
 		}
 		if !hooks.Owned(list[0].Bash) {
@@ -90,7 +90,7 @@ func TestInstallStateUninstall(t *testing.T) {
 		t.Fatalf("forced install changed=%v err=%v", changed, err)
 	}
 	// An older Atlas version's file is outdated and rewritten.
-	if err := os.WriteFile(path, []byte(`{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"atlas hooks copilot stop"}]}}`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"atlas-cli hooks copilot stop"}]}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if a.State(root) != hooks.Outdated {

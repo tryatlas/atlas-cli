@@ -15,7 +15,7 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/tui"
 )
 
-// initStepper numbers atlas init's steps: Organisation, Project, Agents and
+// initStepper numbers atlas-cli init's steps: Organisation, Project, Agents and
 // Background sync for a cloud Project; Agents only for a local one.
 type initStepper []string
 
@@ -57,7 +57,7 @@ func finishInit(cmd *cobra.Command, root string, local, guided bool, steps initS
 	if guided && !embed.Available() && project.MemorySharing(project.ScopeRoot(cmd.Context(), root)) {
 		i, err := chooseStep(steps.step("Memory search"), "Download the memory search model? Agents then find memories by meaning, not only by words.", []tui.Choice{
 			{Label: "Download", Detail: embed.Size + ", once; the same model the Atlas app uses"},
-			{Label: "Not now", Detail: "keyword search; atlas memory index downloads it later"},
+			{Label: "Not now", Detail: "keyword search; atlas-cli memory index downloads it later"},
 		}, 0)
 		if err != nil {
 			return err
@@ -127,7 +127,7 @@ func finishInit(cmd *cobra.Command, root string, local, guided bool, steps initS
 	}
 	fmt.Fprintln(out)
 	tui.Note(out, "Use your agents as usual; sessions and memory are captured as they run.")
-	tui.Note(out, "atlas status shows what was captured · atlas settings changes any of this")
+	tui.Note(out, "atlas-cli status shows what was captured · atlas-cli settings changes any of this")
 	return nil
 }
 
@@ -163,13 +163,13 @@ func pickAgents(cmd *cobra.Command, root string, guided bool, step tui.Step) ([]
 		return resolveAgents(ids, false, nil)
 	case all:
 		if len(detected) == 0 {
-			fmt.Fprintln(cmd.OutOrStdout(), "No supported agent was found on this machine (atlas agents list).")
+			fmt.Fprintln(cmd.OutOrStdout(), "No supported agent was found on this machine (atlas-cli agents list).")
 		}
 		return detected, nil
 	case !guided:
 		return nil, nil
 	case len(detected) == 0:
-		tui.StepDone(cmd.OutOrStdout(), step, "none found on this machine (atlas agents add <agent> later)")
+		tui.StepDone(cmd.OutOrStdout(), step, "none found on this machine (atlas-cli agents add <agent> later)")
 		return nil, nil
 	}
 	choices := make([]tui.Choice, len(detected))
@@ -208,8 +208,8 @@ func pickSync(cmd *cobra.Command, root string, guided bool, step tui.Step) (on, 
 	if clistate.LoadPrefs(root).BackgroundSync {
 		initial = 0
 	}
-	i, err := chooseStep(step, "Keep syncing in the background? (atlas sync on|off changes it later)", []tui.Choice{
-		{Label: "On", Detail: "a background atlas serve sends prompts, tool calls and replies as they happen"},
+	i, err := chooseStep(step, "Keep syncing in the background? (atlas-cli sync on|off changes it later)", []tui.Choice{
+		{Label: "On", Detail: "a background atlas-cli serve sends prompts, tool calls and replies as they happen"},
 		{Label: "Off", Detail: "each agent hook syncs on its own; nothing keeps running"},
 	}, initial)
 	if err != nil {

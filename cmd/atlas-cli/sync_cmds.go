@@ -15,13 +15,13 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/tui"
 )
 
-// atlas sync [on|off]: background sync is a running atlas serve for the
+// atlas-cli sync [on|off]: background sync is a running atlas-cli serve for the
 // Project. on starts it and keeps it wanted, so an agent's next hook
 // restarts it after a reboot; off stops it and forgets it.
 func newSyncCmd() *cobra.Command {
 	return withRun(&cobra.Command{
 		Use:       "sync [on|off]",
-		Short:     "Turn background sync on or off for this Project (a detached atlas serve), or show it",
+		Short:     "Turn background sync on or off for this Project (a detached atlas-cli serve), or show it",
 		Args:      cobra.MatchAll(cobra.MaximumNArgs(1), cobra.OnlyValidArgs),
 		ValidArgs: []string{"on", "off", "status"},
 	}, runSync)
@@ -53,7 +53,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 			}
 			tui.Field(out, "Listener", note)
 			fmt.Fprintln(out)
-			tui.Note(out, "atlas sync on · atlas sync off")
+			tui.Note(out, "atlas-cli sync on · atlas-cli sync off")
 			return nil
 		}
 		printSync(out, p.Root)

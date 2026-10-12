@@ -18,7 +18,7 @@ import (
 
 // The walk that links captured sessions to the commits that carried their
 // work (SPEC §6.6, evidence-capture.md §6.2–6.3). This is the watcher-free
-// version: it runs when a listener stops and on atlas capture link, after
+// version: it runs when a listener stops and on atlas-cli capture link, after
 // reconciling rewrites (reconcile.go).
 
 // scanLimit bounds a scan without a usable cursor.

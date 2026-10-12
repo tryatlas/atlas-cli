@@ -31,7 +31,7 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/tui"
 )
 
-// ── atlas capture sync / retry ───────────────────────────────────────────────
+// ── atlas-cli capture sync / retry ───────────────────────────────────────────────
 
 // runCaptureSync drains now: in this process when the store is free,
 // otherwise by asking the running listener.
@@ -48,7 +48,7 @@ func runCaptureSync(retry bool) func(*cobra.Command, []string) error {
 			return err
 		}
 		if !store.Exists(p.Root) {
-			return errors.New("capture has never been enabled here; run atlas init")
+			return errors.New("capture has never been enabled here; run atlas-cli init")
 		}
 		lock, err := store.Lock(p.Root)
 		if errors.Is(err, store.ErrLocked) {
@@ -94,7 +94,7 @@ func runCaptureSync(retry bool) func(*cobra.Command, []string) error {
 				return "", err
 			}
 			if _, ok := capsync.TargetOf(b); !ok {
-				return strings.Join(append(lines, "This Project is local: nothing syncs. Bind it to a cloud Project with atlas init."), "\n"), nil
+				return strings.Join(append(lines, "This Project is local: nothing syncs. Bind it to a cloud Project with atlas-cli init."), "\n"), nil
 			}
 			if b.DrainState == store.DrainNotAuthorized {
 				// A human action re-checks access (the desktop re-registers).
@@ -127,9 +127,9 @@ func runCaptureSync(retry bool) func(*cobra.Command, []string) error {
 			case capsync.RateLimited:
 				return "", fmt.Errorf("%s The ingest server asked to slow down; try again later", summary)
 			case capsync.NotAuthorized:
-				return "", fmt.Errorf("%s The ingest server refused this Project (403); check your access with atlas status", summary)
+				return "", fmt.Errorf("%s The ingest server refused this Project (403); check your access with atlas-cli status", summary)
 			case capsync.SignedOut:
-				return "", fmt.Errorf("%s Not signed in; run atlas login", summary)
+				return "", fmt.Errorf("%s Not signed in; run atlas-cli login", summary)
 			}
 			return strings.Join(append(lines, summary), "\n"), nil
 		})
@@ -160,9 +160,9 @@ func postSync(ctx context.Context, sock string, retry bool) (listener.SyncAnswer
 	return ans, err
 }
 
-// ── atlas serve ──────────────────────────────────────────────────────────────
+// ── atlas-cli serve ──────────────────────────────────────────────────────────────
 
-// daemonEnv marks the detached child of atlas serve --daemon.
+// daemonEnv marks the detached child of atlas-cli serve --daemon.
 const daemonEnv = "ATLAS_SERVE_DAEMON"
 
 // serveLog is where a detached listener's stderr goes.
@@ -227,7 +227,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			return err
 		})
 		if err := hooks.DrainSpool(ctx, p.Root, h.Recorder, h.Listener.Memory); err != nil {
-			fmt.Fprintln(cmd.ErrOrStderr(), "atlas: spooled hook turns:", err)
+			fmt.Fprintln(cmd.ErrOrStderr(), "atlas-cli: spooled hook turns:", err)
 		}
 	}
 	every, _ := cmd.Flags().GetDuration("import-every")
@@ -278,7 +278,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 				return
 			case <-t.C:
 				if h.Stale() {
-					fmt.Fprintln(cmd.ErrOrStderr(), "atlas: this Project's .atlas was replaced; stopping the listener")
+					fmt.Fprintln(cmd.ErrOrStderr(), "atlas-cli: this Project's .atlas was replaced; stopping the listener")
 					close(stale)
 					return
 				}
@@ -349,7 +349,7 @@ func deliveryEvent(d hooks.Delivery, err error) tui.LiveEvent {
 	return e
 }
 
-// startDaemon re-runs `atlas serve` detached in its own session and waits for
+// startDaemon re-runs `atlas-cli serve` detached in its own session and waits for
 // its run file.
 func startDaemon(cmd *cobra.Command, root string) error {
 	every, _ := cmd.Flags().GetDuration("import-every")
@@ -357,7 +357,7 @@ func startDaemon(cmd *cobra.Command, root string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Listener started (pid %d) on 127.0.0.1:%d. Stop it with atlas sync off.\n", pid, port)
+	fmt.Fprintf(cmd.OutOrStdout(), "Listener started (pid %d) on 127.0.0.1:%d. Stop it with atlas-cli sync off.\n", pid, port)
 	return nil
 }
 
@@ -432,7 +432,7 @@ func haltListener(root string) (int, error) {
 		return 0, nil
 	}
 	if !rf.Daemon {
-		return 0, fmt.Errorf("the listener (pid %d) belongs to atlas run or a foreground atlas serve; exit that instead", rf.PID)
+		return 0, fmt.Errorf("the listener (pid %d) belongs to atlas-cli run or a foreground atlas-cli serve; exit that instead", rf.PID)
 	}
 	if err := syscall.Kill(rf.PID, syscall.SIGTERM); err != nil {
 		return 0, err

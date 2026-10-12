@@ -1,8 +1,8 @@
-// Package listener runs a Project's listener for atlas serve (and atlas run):
+// Package listener runs a Project's listener for atlas-cli serve (and atlas-cli run):
 // the shared-memory MCP server on a loopback HTTP port, reached by agents
 // through the per-session bearer handed out on session/new (ADR-0009), and an
 // owner-only Unix socket that carries the control endpoints: /sync for
-// atlas capture sync and retry, /hook for turns delivered by agent hooks, and
+// atlas-cli capture sync and retry, /hook for turns delivered by agent hooks, and
 // /mcp for the memory bridge of agents run in their own UIs (ADR-0013). Both
 // are published in the CLI's state directory (clistate) as run.json.
 package listener
@@ -32,7 +32,7 @@ type RunFile struct {
 	Port      int    `json:"port"`
 	StartedAt string `json:"startedAt"`
 	Socket    string `json:"socket"`
-	Daemon    bool   `json:"daemon,omitempty"` // started by atlas serve --daemon
+	Daemon    bool   `json:"daemon,omitempty"` // started by atlas-cli serve --daemon
 }
 
 // RunFilePath is where a Project's run file lives.
@@ -54,8 +54,8 @@ func ReadRunFile(root string) *RunFile {
 	return &rf
 }
 
-// Syncer is the background drain, driven from POST /sync by atlas capture
-// sync and atlas capture retry while the listener holds the store.
+// Syncer is the background drain, driven from POST /sync by atlas-cli capture
+// sync and atlas-cli capture retry while the listener holds the store.
 type Syncer interface {
 	Force()
 	RetryFailed(ctx context.Context) (int64, error)
@@ -68,7 +68,7 @@ type SyncRequest struct {
 	Link   bool `json:"link"`   // also link captured sessions to new commits now
 }
 
-// Importer is the native-session import loop of atlas serve.
+// Importer is the native-session import loop of atlas-cli serve.
 type Importer interface {
 	ImportNow()
 }
@@ -88,7 +88,7 @@ type SyncAnswer struct {
 // Options configure the listener.
 type Options struct {
 	Sync   Syncer // nil: this listener does not drain
-	Daemon bool   // recorded in the run file for atlas serve --stop
+	Daemon bool   // recorded in the run file for atlas-cli serve --stop
 }
 
 // Listener is a running listener.
@@ -102,7 +102,7 @@ type Listener struct {
 	control  *http.Server
 	tcp      *http.Server
 	done     chan struct{}
-	importer atomic.Value // Importer, set once atlas serve starts its loop
+	importer atomic.Value // Importer, set once atlas-cli serve starts its loop
 	hooks    atomic.Value // HookSink
 	linker   atomic.Value // Linker
 }

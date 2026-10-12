@@ -213,7 +213,7 @@ func (s *Store) ReconcileNote(ctx context.Context, workspaceID string) string {
 	return n.String
 }
 
-// Health is the capture-health summary atlas status shows.
+// Health is the capture-health summary atlas-cli status shows.
 type Health struct {
 	Sessions, NeedsAttention, OpenTurns, Orphaned int
 	Cursor                                        *Cursor

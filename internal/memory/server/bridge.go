@@ -100,7 +100,7 @@ func RunBridge(ctx context.Context, in io.Reader, out io.Writer, f Forwarder) er
 			// request before initialize (Antigravity probes server/discover
 			// first) is "method not found", which makes the client fall back
 			// to initialize.
-			code, text := -32000, fmt.Sprintf("atlas memory server said %d", r.Status)
+			code, text := -32000, fmt.Sprintf("atlas-cli memory server said %d", r.Status)
 			if initMsg == nil {
 				code, text = -32601, "method not found before initialize"
 			}
@@ -202,7 +202,7 @@ func writeReply(w *bufio.Writer, r *Reply) error {
 // writeError answers a request the bridge could not deliver with a JSON-RPC
 // error, so the agent hears about it instead of the bridge ending.
 func writeError(w *bufio.Writer, msg []byte, err error) error {
-	return writeRPCError(w, msg, -32000, "atlas memory server unreachable: "+err.Error())
+	return writeRPCError(w, msg, -32000, "atlas-cli memory server unreachable: "+err.Error())
 }
 
 // ── HTTP forwarder ───────────────────────────────────────────────────────────

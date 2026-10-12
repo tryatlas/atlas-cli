@@ -19,7 +19,7 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/tui"
 )
 
-// atlas memory index: what the app's memory indexer does for a Project:
+// atlas-cli memory index: what the app's memory indexer does for a Project:
 // the MiniLM model (downloaded once, shared with the app), a vector for
 // every durable memory, and the corpus of documents memory_search returns.
 func newMemoryIndexCmd() *cobra.Command {
@@ -49,7 +49,7 @@ func runMemoryIndex(cmd *cobra.Command, _ []string) error {
 		_, err := indexMemory(ctx, p.Root, p.ScopeRoot, false, func(string) {}, func(float64) {})
 		if err != nil && !errors.Is(err, errIndexBusy) {
 			// The hooks log is where background work reports.
-			fmt.Fprintln(cmd.ErrOrStderr(), "atlas: memory index:", err)
+			fmt.Fprintln(cmd.ErrOrStderr(), "atlas-cli: memory index:", err)
 		}
 		return nil
 	}
@@ -64,7 +64,7 @@ var errIndexBusy = errors.New("another index pass is running")
 // corpus. One pass per Project at a time.
 func indexMemory(ctx context.Context, root, scope string, download bool, step tui.StepFunc, frac tui.FracFunc) (string, error) {
 	if !project.MemorySharing(scope) {
-		return "Shared memory is off here (atlas memory enable); nothing to index.", nil
+		return "Shared memory is off here (atlas-cli memory enable); nothing to index.", nil
 	}
 	lock, err := os.OpenFile(clistate.Path(root, "index.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -121,7 +121,7 @@ func indexMemory(ctx context.Context, root, scope string, download bool, step tu
 	msg := fmt.Sprintf("Memory index ready: %d documents (%d new, %d changed, %d removed); %d memories embedded.",
 		len(docs), stats.Added, stats.Updated, stats.Deleted, embedded)
 	if vectors == nil {
-		msg += " No model on this machine: keyword search only (atlas memory index downloads it)."
+		msg += " No model on this machine: keyword search only (atlas-cli memory index downloads it)."
 	}
 	return msg, nil
 }

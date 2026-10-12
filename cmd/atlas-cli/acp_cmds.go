@@ -19,15 +19,15 @@ import (
 )
 
 // newACPCmd is the parked ACP path (ADR-0013 §8): the registry, installs,
-// atlas acp run with the chat screen, and the session/load importer.
+// atlas-cli acp run with the chat screen, and the session/load importer.
 func newACPCmd() *cobra.Command {
 	list := withRun(leaf("list", "List the ACP agent registry: installed and available agents", cobra.NoArgs), runACPList)
 	list.Flags().Bool("refresh", false, "fetch the registry now instead of using the hourly cache")
 	install := withRun(leaf("install <agent>", "Install a registry agent (it downloads on first run)", cobra.ExactArgs(1)), runAgentsInstall)
-	install.Flags().Bool("detected", false, "use the copy found on PATH instead of downloading (see atlas acp detect)")
+	install.Flags().Bool("detected", false, "use the copy found on PATH instead of downloading (see atlas-cli acp detect)")
 	uninstall := withRun(leaf("uninstall <agent>", "Remove an installed agent", cobra.ExactArgs(1)), runAgentsUninstall)
 	uninstall.Flags().Bool("purge", false, "also delete its downloaded files")
-	c := group("acp", "ACP agents run by Atlas (parked; see atlas agents for the hook path)",
+	c := group("acp", "ACP agents run by Atlas (parked; see atlas-cli agents for the hook path)",
 		list, install, uninstall,
 		withRun(leaf("detect", "Find registry agents already on PATH", cobra.NoArgs), runAgentsDetect),
 		newAgentsCheckCmd(),
@@ -53,7 +53,7 @@ func runACPList(cmd *cobra.Command, _ []string) error {
 		return rerr
 	}
 	if rerr != nil {
-		fmt.Fprintln(cmd.ErrOrStderr(), "atlas:", rerr)
+		fmt.Fprintln(cmd.ErrOrStderr(), "atlas-cli:", rerr)
 	}
 	inst, _, err := a.Installed()
 	if err != nil {
@@ -128,7 +128,7 @@ func runAgentsDetect(cmd *cobra.Command, _ []string) error {
 	for _, id := range ids {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", id, found[id])
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "Use one with: atlas acp install <agent> --detected")
+	fmt.Fprintln(cmd.OutOrStdout(), "Use one with: atlas-cli acp install <agent> --detected")
 	return nil
 }
 
@@ -146,7 +146,7 @@ func runAgentsInstall(cmd *cobra.Command, args []string) error {
 			return rerr
 		}
 		if e, ok = reg.Find(id); !ok {
-			return fmt.Errorf("%s: %w (atlas acp list)", id, acp.ErrNotInRegistry)
+			return fmt.Errorf("%s: %w (atlas-cli acp list)", id, acp.ErrNotInRegistry)
 		}
 	}
 	if !e.Supported() {
@@ -172,10 +172,10 @@ func runAgentsInstall(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if entry.Type == acp.TypeCustom {
-		fmt.Fprintf(cmd.OutOrStdout(), "Installed %s from %s: atlas acp run %s\n", e.Name, entry.Command, id)
+		fmt.Fprintf(cmd.OutOrStdout(), "Installed %s from %s: atlas-cli acp run %s\n", e.Name, entry.Command, id)
 		return nil
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Installed %s %s. It downloads on first run: atlas acp run %s\n", e.Name, e.Version, id)
+	fmt.Fprintf(cmd.OutOrStdout(), "Installed %s %s. It downloads on first run: atlas-cli acp run %s\n", e.Name, e.Version, id)
 	return nil
 }
 

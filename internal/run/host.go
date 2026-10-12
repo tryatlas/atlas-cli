@@ -1,4 +1,4 @@
-// Package run hosts what atlas run and atlas serve need around an agent:
+// Package run hosts what atlas-cli run and atlas-cli serve need around an agent:
 // the Project's listener (memory over loopback HTTP), the capture store
 // under the writer lock, the sync drain, and the ACP session that feeds the
 // recorder (ADR-0009).
@@ -19,7 +19,7 @@ import (
 )
 
 // ErrLocked is the desktop (or another atlas) recording this Project.
-var ErrLocked = errors.New("another Atlas window is recording this Project; close the folder in the Atlas app (or stop the other atlas run or atlas serve) and try again")
+var ErrLocked = errors.New("another Atlas window is recording this Project; close the folder in the Atlas app (or stop the other atlas-cli run or atlas-cli serve) and try again")
 
 // HostOptions configure a host.
 type HostOptions struct {
@@ -49,7 +49,7 @@ type Host struct {
 }
 
 // Stale reports that the Project's store is no longer the one this host
-// opened: .atlas/ was deleted or re-created (atlas init again, or by hand),
+// opened: .atlas/ was deleted or re-created (atlas-cli init again, or by hand),
 // or a store appeared where there was none. A stale host must stop; it
 // would otherwise keep writing into a deleted file.
 func (h *Host) Stale() bool {

@@ -15,7 +15,7 @@ import (
 )
 
 // ErrNotInitialised means no binding was found from the cwd up to the scope root.
-var ErrNotInitialised = errors.New("this folder is not an Atlas Project; run atlas init")
+var ErrNotInitialised = errors.New("this folder is not an Atlas Project; run atlas-cli init")
 
 // Project is a bound folder as seen from a working directory.
 type Project struct {

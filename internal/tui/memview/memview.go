@@ -1,4 +1,4 @@
-// Package memview is the shared-memory browser (atlas memory browse): the
+// Package memview is the shared-memory browser (atlas-cli memory browse): the
 // record's entries by kind, search, and one entry with its evidence and
 // revision history. It only reads.
 package memview

@@ -132,7 +132,7 @@ const (
 	OtherDeadline   = 8 * time.Second
 )
 
-// Noter is an agent with something the user must do once after atlas agents
+// Noter is an agent with something the user must do once after atlas-cli agents
 // add (approve the hooks in the agent's own UI, trust the project, …).
 type Noter interface {
 	AddNote() string

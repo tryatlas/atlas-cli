@@ -58,7 +58,7 @@ func TestInstallIntoEmptyDir(t *testing.T) {
 			t.Fatalf("%s: %+v", typ, groups)
 		}
 		h := groups[0].Hooks[0]
-		if h.Type != "command" || h.Timeout != timeout || !hooks.Owned(h.Command) || !strings.Contains(h.Command, "atlas hooks codex ") {
+		if h.Type != "command" || h.Timeout != timeout || !hooks.Owned(h.Command) || !strings.Contains(h.Command, "atlas-cli hooks codex ") {
 			t.Fatalf("%s: %+v", typ, h)
 		}
 	}

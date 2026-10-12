@@ -1,4 +1,4 @@
-// Command atlas is the headless Atlas CLI: shared memory and session capture
+// Command atlas-cli is the headless Atlas CLI: shared memory and session capture
 // for coding agents on a server, byte-compatible with the Atlas desktop app.
 package main
 
@@ -44,7 +44,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		if !errors.Is(err, tui.ErrCancelled) && !tui.Shown(err) { // the screen already said so
-			fmt.Fprintln(stderr, "atlas:", err)
+			fmt.Fprintln(stderr, "atlas-cli:", err)
 		}
 		return 1
 	}

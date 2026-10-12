@@ -59,7 +59,7 @@ func Animate(w io.Writer, render func(t float64) string) {
 // Command is one line of the splash's command list.
 type Command struct{ Name, Short string }
 
-// Splash is `atlas` with no command: the mark lighting up stripe by stripe,
+// Splash is `atlas-cli` with no command: the mark lighting up stripe by stripe,
 // the name and version beside it, then the commands by group.
 func Splash(w io.Writer, version string, groups map[string][]Command, order []string) {
 	Animate(w, func(t float64) string {
@@ -78,10 +78,10 @@ func Splash(w io.Writer, version string, groups map[string][]Command, order []st
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "  "+Upper(g))
 		for _, c := range groups[g] {
-			fmt.Fprintln(w, "  "+Default.Bold.Render(fmt.Sprintf("atlas %-*s", nameW, c.Name))+"  "+Default.Faint.Render(Fit(c.Short, Width()-nameW-12)))
+			fmt.Fprintln(w, "  "+Default.Bold.Render(fmt.Sprintf("atlas-cli %-*s", nameW, c.Name))+"  "+Default.Faint.Render(Fit(c.Short, Width()-nameW-16)))
 		}
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+Keys("atlas <command> --help", "details", "atlas init", "start here"))
+	fmt.Fprintln(w, "  "+Keys("atlas <command> --help", "details", "atlas-cli init", "start here"))
 	fmt.Fprintln(w)
 }

@@ -65,7 +65,7 @@ func (a Agents) Ensure(ctx context.Context, id string) (*acp.Installed, *acp.Reg
 	if inst == nil {
 		e, ok := reg.Find(id)
 		if !ok {
-			return nil, nil, fmt.Errorf("%s: %w (atlas agents list)", id, acp.ErrNotInRegistry)
+			return nil, nil, fmt.Errorf("%s: %w (atlas-cli agents list)", id, acp.ErrNotInRegistry)
 		}
 		if !e.Supported() {
 			return nil, nil, fmt.Errorf("%s does not run on %s", id, acp.PlatformKey())

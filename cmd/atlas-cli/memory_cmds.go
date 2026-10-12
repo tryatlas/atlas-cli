@@ -71,7 +71,7 @@ func runMemoryImport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if !project.MemorySharing(gateRoot(cmd, cwd)) {
-		return errors.New("shared memory is switched off for this project (atlas memory enable)")
+		return errors.New("shared memory is switched off for this project (atlas-cli memory enable)")
 	}
 	st, err := openRecord(cmd, true)
 	if err != nil {
@@ -99,7 +99,7 @@ func gateRoot(cmd *cobra.Command, cwd string) string {
 // never in argv. Without one it is the entry an agent's MCP config holds
 // (ADR-0013 §6): it reaches a running listener over the owner-only socket,
 // else serves memory in this process, so memory works with or without
-// atlas serve.
+// atlas-cli serve.
 func runMCPBridge(cmd *cobra.Command, args []string) error {
 	if len(args) == 1 {
 		f, err := server.NewTCPForwarder(args[0], os.Getenv("ATLAS_MCP_TOKEN"))
@@ -137,7 +137,7 @@ func runMCPBridge(cmd *cobra.Command, args []string) error {
 // runMemoryBrowse opens the memory browser.
 func runMemoryBrowse(cmd *cobra.Command, _ []string) error {
 	if !interactive() {
-		return errors.New("the browser needs a terminal; use atlas memory list")
+		return errors.New("the browser needs a terminal; use atlas-cli memory list")
 	}
 	st, err := openRecord(cmd, false)
 	if err != nil {
@@ -197,7 +197,7 @@ func runMemoryList(cmd *cobra.Command, _ []string) error {
 				tui.Fit(strings.Join(strings.Fields(e.Content), " "), max(tui.Width()-50, 20))})
 		}
 		fmt.Fprint(out, tui.Table([]string{"id", "kind", "state", "memory"}, rows))
-		tui.Note(out, fmt.Sprintf("%d memories · atlas memory browse to read them", len(es)))
+		tui.Note(out, fmt.Sprintf("%d memories · atlas-cli memory browse to read them", len(es)))
 		return nil
 	}
 	for _, e := range es {

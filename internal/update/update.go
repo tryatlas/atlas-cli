@@ -89,11 +89,11 @@ func (s Source) Latest(ctx context.Context) (string, error) {
 
 // Archive is the release archive for this platform.
 func Archive(tag, goos, goarch string) string {
-	return fmt.Sprintf("atlas_%s_%s_%s.tar.gz", strings.TrimPrefix(tag, "v"), goos, goarch)
+	return fmt.Sprintf("atlas-cli_%s_%s_%s.tar.gz", strings.TrimPrefix(tag, "v"), goos, goarch)
 }
 
 // Download fetches this platform's archive for tag, checks it against the
-// release's checksums.txt, and returns the atlas binary inside it.
+// release's checksums.txt, and returns the atlas-cli binary inside it.
 func (s Source) Download(ctx context.Context, tag string) ([]byte, error) {
 	name := Archive(tag, runtime.GOOS, runtime.GOARCH)
 	sums, err := s.get(ctx, s.Base+"/"+tag+"/checksums.txt", 1<<20)
@@ -121,7 +121,7 @@ func (s Source) Download(ctx context.Context, tag string) ([]byte, error) {
 	return binaryFrom(arch)
 }
 
-// binaryFrom extracts the "atlas" file from a tar.gz.
+// binaryFrom extracts the "atlas-cli" file from a tar.gz.
 func binaryFrom(archive []byte) ([]byte, error) {
 	zr, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
@@ -131,19 +131,19 @@ func binaryFrom(archive []byte) ([]byte, error) {
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return nil, errors.New("the archive holds no atlas binary")
+			return nil, errors.New("the archive holds no atlas-cli binary")
 		}
 		if err != nil {
 			return nil, err
 		}
-		if h.Typeflag == tar.TypeReg && filepath.Base(h.Name) == "atlas" {
+		if h.Typeflag == tar.TypeReg && filepath.Base(h.Name) == "atlas-cli" {
 			return io.ReadAll(io.LimitReader(tr, maxArchive))
 		}
 	}
 }
 
 // Replace swaps the binary at path for bin: written next to it, then
-// renamed over it, so a running atlas keeps its open file and a failure
+// renamed over it, so a running atlas-cli keeps its open file and a failure
 // leaves the old one in place.
 func Replace(path string, bin []byte) error {
 	mode := os.FileMode(0o755)

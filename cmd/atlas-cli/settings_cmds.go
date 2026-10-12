@@ -22,7 +22,7 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/tui/settings"
 )
 
-// atlas settings: account, Project gates, agents and background sync on
+// atlas-cli settings: account, Project gates, agents and background sync on
 // one screen. Without a terminal it prints the same rows.
 func newSettingsCmd() *cobra.Command {
 	return withRun(leaf("settings", "Change this Project's capture, shared memory, agents and background sync on one screen", cobra.NoArgs), runSettings)
@@ -87,7 +87,7 @@ func (b *settingsBackend) project(ctx context.Context) *project.Project {
 	return p
 }
 
-const needInit = "Run atlas init in this folder first."
+const needInit = "Run atlas-cli init in this folder first."
 
 // Load builds the sections.
 func (b *settingsBackend) Load(ctx context.Context) ([]settings.Section, error) {
@@ -105,7 +105,7 @@ func (b *settingsBackend) account() settings.Section {
 	}
 	if s == nil {
 		sec.Items = []settings.Item{{Label: "Signed in as", Value: "not signed in",
-			Detail: "Run atlas login to sync sessions and memory to a cloud Project."}}
+			Detail: "Run atlas-cli login to sync sessions and memory to a cloud Project."}}
 		return sec
 	}
 	who := "signed in"
@@ -121,8 +121,8 @@ func (b *settingsBackend) account() settings.Section {
 		n = len(*s.Identity.Orgs)
 	}
 	sec.Items = []settings.Item{
-		{Label: "Signed in as", Value: who, Detail: "atlas logout signs out and deletes the local session file."},
-		{Label: "Active organisation", Value: org, Detail: "atlas org use <id> changes it; atlas org list shows them."},
+		{Label: "Signed in as", Value: who, Detail: "atlas-cli logout signs out and deletes the local session file."},
+		{Label: "Active organisation", Value: org, Detail: "atlas-cli org use <id> changes it; atlas-cli org list shows them."},
 		{Label: "Organisations", Value: fmt.Sprint(n)},
 		{Label: "Session file", Value: a.Store.Path(), Detail: "The only secret Atlas keeps on disk (mode 0600)."},
 	}
@@ -151,7 +151,7 @@ func (b *settingsBackend) projectSection(ctx context.Context, p *project.Project
 		}
 		if bind != nil {
 			sec.Items = append(sec.Items, settings.Item{Label: "Bound to", Value: describeBinding(bind, sess),
-				Detail: "atlas init binds the folder again (another organisation or Project)."})
+				Detail: "atlas-cli init binds the folder again (another organisation or Project)."})
 		}
 		if p.ScopeRoot != p.Root {
 			sec.Items = append(sec.Items, settings.Item{Label: "Memory lives at", Value: p.ScopeRoot})
@@ -222,7 +222,7 @@ func (b *settingsBackend) sync(ctx context.Context, p *project.Project) settings
 	}
 	on, line := syncState(p.Root)
 	sec.Items = append(sec.Items, settings.Item{Key: "sync", Label: "Background sync", Kind: settings.Toggle, On: on, Value: line,
-		Detail: "Keeps atlas serve running for this Project: hooks hand it each prompt, tool call and reply, and it sends them to the cloud at once. Your agents' hooks restart it after a reboot. Same as atlas sync on|off."})
+		Detail: "Keeps atlas-cli serve running for this Project: hooks hand it each prompt, tool call and reply, and it sends them to the cloud at once. Your agents' hooks restart it after a reboot. Same as atlas-cli sync on|off."})
 	if st, err := store.Open(p.Root, false); err == nil {
 		if c, err := st.OutboxCounts(ctx); err == nil {
 			sec.Items = append(sec.Items, settings.Item{Label: "Outbox", Value: fmt.Sprintf("%d pending, %d failed", c[store.SyncPending], c[store.SyncFailed])})
@@ -230,8 +230,8 @@ func (b *settingsBackend) sync(ctx context.Context, p *project.Project) settings
 		_ = st.Close()
 	}
 	sec.Items = append(sec.Items,
-		settings.Item{Key: "sync:now", Label: "Sync now", Kind: settings.Action, Detail: "Send what is pending to the cloud Project now (atlas capture sync)."},
-		settings.Item{Key: "sync:retry", Label: "Retry failed", Kind: settings.Action, Detail: "Re-queue rows that failed to sync, then sync (atlas capture retry)."},
+		settings.Item{Key: "sync:now", Label: "Sync now", Kind: settings.Action, Detail: "Send what is pending to the cloud Project now (atlas-cli capture sync)."},
+		settings.Item{Key: "sync:retry", Label: "Retry failed", Kind: settings.Action, Detail: "Re-queue rows that failed to sync, then sync (atlas-cli capture retry)."},
 	)
 	if e := strings.TrimSpace(hooks.LastError(p.Root)); e != "" {
 		sec.Items = append(sec.Items, settings.Item{Label: "Last hook error", Value: e, Detail: e})
@@ -261,7 +261,7 @@ func (b *settingsBackend) model(p *project.Project) settings.Section {
 	}
 	sec.Items = append(sec.Items, dl)
 	idx := settings.Item{Key: "memory:index", Label: "Build memory index", Kind: settings.Action,
-		Detail: "Embed every memory and index the project's documents now (atlas memory index). Hooks and atlas serve also keep it current."}
+		Detail: "Embed every memory and index the project's documents now (atlas-cli memory index). Hooks and atlas-cli serve also keep it current."}
 	if p == nil {
 		idx.Disabled = needInit
 	}
@@ -277,9 +277,9 @@ func (b *settingsBackend) model(p *project.Project) settings.Section {
 func (b *settingsBackend) about(p *project.Project) settings.Section {
 	sec := settings.Section{Title: "About", Icon: "◇", Items: []settings.Item{
 		{Label: "Version", Value: version},
-		{Key: "update:check", Label: "Check for updates", Kind: settings.Action, Detail: "Ask GitHub for the latest release (atlas update --check)."},
+		{Key: "update:check", Label: "Check for updates", Kind: settings.Action, Detail: "Ask GitHub for the latest release (atlas-cli update --check)."},
 		{Key: "update", Label: "Update atlas", Kind: settings.Action,
-			Detail: "Download the latest release for this machine, verify it against the release's checksums.txt, and replace this binary (atlas update). A background listener is restarted on the new version."},
+			Detail: "Download the latest release for this machine, verify it against the release's checksums.txt, and replace this binary (atlas-cli update). A background listener is restarted on the new version."},
 	}}
 	if p != nil {
 		sec.Items = append(sec.Items,

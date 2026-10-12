@@ -8,7 +8,7 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/tui"
 )
 
-// statusGroups puts atlas status's lines under the card's sections.
+// statusGroups puts atlas-cli status's lines under the card's sections.
 var statusGroups = []struct {
 	title  string
 	labels []string

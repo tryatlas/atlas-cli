@@ -50,7 +50,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 	case http.MethodDelete:
 		// Ends the MCP connection only: session_start/session_end belong to
-		// the agent session's host (atlas run), not to one MCP connection.
+		// the agent session's host (atlas-cli run), not to one MCP connection.
 		h.mu.Lock()
 		delete(h.sessions, r.Header.Get("Mcp-Session-Id"))
 		h.mu.Unlock()

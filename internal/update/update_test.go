@@ -24,7 +24,7 @@ func Fake(t *testing.T, tag string, bin []byte, corrupt bool) Source {
 	var arch bytes.Buffer
 	zw := gzip.NewWriter(&arch)
 	tw := tar.NewWriter(zw)
-	for name, body := range map[string][]byte{"README.md": []byte("readme"), "atlas": bin} {
+	for name, body := range map[string][]byte{"README.md": []byte("readme"), "atlas-cli": bin} {
 		_ = tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg})
 		_, _ = tw.Write(body)
 	}
@@ -41,7 +41,7 @@ func Fake(t *testing.T, tag string, bin []byte, corrupt bool) Source {
 		fmt.Fprintf(w, `{"tag_name":%q}`, tag)
 	})
 	mux.HandleFunc("/dl/"+tag+"/checksums.txt", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, "%s  %s\n%s  atlas_x_plan9_mips.tar.gz\n", hexsum, name, strings.Repeat("1", 64))
+		fmt.Fprintf(w, "%s  %s\n%s  atlas-cli_x_plan9_mips.tar.gz\n", hexsum, name, strings.Repeat("1", 64))
 	})
 	mux.HandleFunc("/dl/"+tag+"/"+name, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(arch.Bytes()) })
 	srv := httptest.NewServer(mux)

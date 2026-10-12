@@ -45,7 +45,7 @@ func TestCursorWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := obj.Servers[ServerName]
-	if e.Command != "atlas" || e.Type != "" || len(e.Args) != 5 || e.Args[0] != "mcp-bridge" || e.Args[2] != root || e.Args[4] != "cursor" {
+	if e.Command != "atlas-cli" || e.Type != "" || len(e.Args) != 5 || e.Args[0] != "mcp-bridge" || e.Args[2] != root || e.Args[4] != "cursor" {
 		t.Fatalf("entry %+v", e)
 	}
 	if obj.Servers["other"].URL != "http://x" || obj.Extra != 1 {

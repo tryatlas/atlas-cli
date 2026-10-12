@@ -33,7 +33,7 @@ var (
 )
 
 // lockedHelp follows the desktop's "Another Atlas window is recording this Project".
-const lockedHelp = "another Atlas window is recording this Project; close the folder in the Atlas app (or stop the other atlas run or atlas serve) and try again"
+const lockedHelp = "another Atlas window is recording this Project; close the folder in the Atlas app (or stop the other atlas-cli run or atlas-cli serve) and try again"
 
 func runInit(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
@@ -219,7 +219,7 @@ func pickOrg(cmd *cobra.Command, s *auth.Session, step tui.Step) (auth.Org, erro
 		orgs = *s.Identity.Orgs
 	}
 	if len(orgs) == 0 {
-		return auth.Org{}, errors.New("you are not in any organisation; create one with atlas org create <name>, or use atlas init --local")
+		return auth.Org{}, errors.New("you are not in any organisation; create one with atlas-cli org create <name>, or use atlas-cli init --local")
 	}
 	if want != "" {
 		for _, o := range orgs {
@@ -228,14 +228,14 @@ func pickOrg(cmd *cobra.Command, s *auth.Session, step tui.Step) (auth.Org, erro
 				return o, nil
 			}
 		}
-		return auth.Org{}, fmt.Errorf("%s is not one of your organisations (atlas org list)", want)
+		return auth.Org{}, fmt.Errorf("%s is not one of your organisations (atlas-cli org list)", want)
 	}
 	if len(orgs) == 1 {
 		stepDone(cmd, step, orgs[0].Name+" (your only organisation)")
 		return orgs[0], nil
 	}
 	if !interactive() {
-		return auth.Org{}, errors.New("you belong to several organisations; pass --org <id> (atlas org list)")
+		return auth.Org{}, errors.New("you belong to several organisations; pass --org <id> (atlas-cli org list)")
 	}
 	choices := make([]tui.Choice, len(orgs))
 	initial := 0
@@ -542,10 +542,10 @@ func statusLines(cmd *cobra.Command, w io.Writer) error {
 			if id := s.ActiveOrgID(); id != "" {
 				fmt.Fprintf(w, "Org:       %s\n", orgLabel(s, id))
 			} else {
-				fmt.Fprintln(w, "Org:       none chosen (atlas org use)")
+				fmt.Fprintln(w, "Org:       none chosen (atlas-cli org use)")
 			}
 		} else {
-			fmt.Fprintln(w, "Account:   not signed in (atlas login)")
+			fmt.Fprintln(w, "Account:   not signed in (atlas-cli login)")
 		}
 	}
 	cwd, err := os.Getwd()
@@ -554,7 +554,7 @@ func statusLines(cmd *cobra.Command, w io.Writer) error {
 	}
 	p, err := project.Discover(ctx, cwd)
 	if errors.Is(err, project.ErrNotInitialised) {
-		fmt.Fprintln(w, "Project:   not initialised here (atlas init)")
+		fmt.Fprintln(w, "Project:   not initialised here (atlas-cli init)")
 		dir, _ := project.Canonical(cwd)
 		printGates(w, dir, nil)
 		return nil
@@ -578,7 +578,7 @@ func statusLines(cmd *cobra.Command, w io.Writer) error {
 	}
 	printGates(w, p.Root, b)
 	if l, err := store.Lock(p.Root); errors.Is(err, store.ErrLocked) {
-		fmt.Fprintln(w, "Recorder:  another Atlas window (or atlas run / atlas serve) is recording this Project")
+		fmt.Fprintln(w, "Recorder:  another Atlas window (or atlas-cli run / atlas-cli serve) is recording this Project")
 	} else if err == nil {
 		_ = l.Release()
 		fmt.Fprintln(w, "Recorder:  idle")
@@ -608,7 +608,7 @@ func printCaptureHealth(ctx context.Context, w io.Writer, st *store.Store, root 
 	fmt.Fprintf(w, "Sessions:  %s\n", line)
 	switch {
 	case h.Cursor == nil || h.Cursor.LastSeen == nil:
-		fmt.Fprintln(w, "Commits:   not walked yet (atlas capture link)")
+		fmt.Fprintln(w, "Commits:   not walked yet (atlas-cli capture link)")
 	default:
 		c := *h.Cursor.LastSeen
 		if len(c) > 7 {
@@ -630,11 +630,11 @@ func printCaptureHealth(ctx context.Context, w io.Writer, st *store.Store, root 
 	counts, _ := st.OutboxCounts(ctx)
 	state := "ok"
 	if b.DrainState == store.DrainNotAuthorized {
-		state = "refused by the server (403): check your access, then atlas capture sync"
+		state = "refused by the server (403): check your access, then atlas-cli capture sync"
 	}
 	fmt.Fprintf(w, "Sync:      %s · %d sent, %d pending, %d failed", state, counts[store.SyncSent], counts[store.SyncPending], counts[store.SyncFailed])
 	if counts[store.SyncFailed] > 0 {
-		fmt.Fprint(w, " (atlas capture retry)")
+		fmt.Fprint(w, " (atlas-cli capture retry)")
 	}
 	fmt.Fprintln(w)
 }
@@ -655,7 +655,7 @@ func printMemoryHealth(ctx context.Context, w io.Writer, scope string) {
 	if rep, err := rs.VerifyChain(); err != nil {
 		chain = "chain unreadable"
 	} else if !rep.OK() {
-		chain = fmt.Sprintf("chain BROKEN at revision %d (atlas memory verify)", rep.FirstBad)
+		chain = fmt.Sprintf("chain BROKEN at revision %d (atlas-cli memory verify)", rep.FirstBad)
 	}
 	fmt.Fprintf(w, "Record:    %d memories · %s · this machine only\n", n, chain)
 }

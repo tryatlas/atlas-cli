@@ -193,7 +193,7 @@ func Sweep(root string, now time.Time) {
 }
 
 // LogError appends one line to the hooks log and remembers it as the last
-// error for atlas status.
+// error for atlas-cli status.
 func LogError(root string, agent, verb string, err error) {
 	if err == nil {
 		return

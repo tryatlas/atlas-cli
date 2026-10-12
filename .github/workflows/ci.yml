@@ -42,8 +42,8 @@ jobs:
         run: go test -timeout 5m ./...
       - uses: actions/upload-artifact@v7
         with:
-          name: atlas-${{ matrix.runner }}
-          path: bin/atlas
+          name: atlas-cli-${{ matrix.runner }}
+          path: bin/atlas-cli
           retention-days: 7
 
   lint:

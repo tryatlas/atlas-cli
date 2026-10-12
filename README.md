@@ -42,22 +42,31 @@ macOS (Apple silicon, Intel) and Linux (amd64, arm64):
 curl -fsSL https://github.com/tryatlas/atlas-cli/releases/latest/download/install.sh | sh
 ```
 
-The installer verifies the archive's sha256 and puts `atlas` in `~/.local/bin`
+The installer verifies the archive's sha256 and puts `atlas-cli` in `~/.local/bin`
 (`ATLAS_INSTALL_DIR` changes it, `ATLAS_VERSION=v0.4.0` pins it). Later,
-`atlas update` does the same in place. From source: `make build` (pure Go, no
+`atlas-cli update` does the same in place. From source: `make build` (pure Go, no
 cgo).
+
+Coming from a release up to v0.4.0, where the command was `atlas`: run the
+installer again (it removes the old `atlas`), then `atlas-cli agents add --all`
+in each Project to point the agents' hooks at the new name.
+
+To remove it: `atlas-cli uninstall` takes Atlas's hooks and memory entries out
+of every Project, stops the listeners, and deletes the CLI's state and binary.
+Each Project's `.atlas/` and your sign-in stay for the desktop app (`atlas-cli
+logout` first to sign out too).
 
 ## Quick start
 
 ```sh
-atlas login          # sign in (the same account as the desktop app)
+atlas-cli login      # sign in (the same account as the desktop app)
 cd ~/work/backend
-atlas init           # organisation → Project → agents → background sync
+atlas-cli init       # organisation → Project → agents → background sync
 claude               # …or codex, cursor-agent, opencode, copilot: work as usual
-atlas status         # what was captured, what synced, what agents remember
+atlas-cli status     # what was captured, what synced, what agents remember
 ```
 
-`atlas init` is a guided flow on a terminal:
+`atlas-cli init` is a guided flow on a terminal:
 
 | step | asks |
 |---|---|
@@ -71,13 +80,13 @@ atlas status         # what was captured, what synced, what agents remember
 `--project | --create`, `--agents claude-code,codex | --all-agents`,
 `--sync on|off`.
 
-`atlas settings` changes any of it later on one screen: account, capture and
+`atlas-cli settings` changes any of it later on one screen: account, capture and
 memory, each agent, background sync, the local model, updates.
 
 ## Shared memory
 
 Every agent in the project reads and writes one memory, through the
-`atlas_memory` MCP server that `atlas agents add` registers in the agent's own
+`atlas_memory` MCP server that `atlas-cli agents add` registers in the agent's own
 config. Nothing is ever injected into a prompt: agents pull what they need.
 
 | tool | what an agent gets |
@@ -106,8 +115,8 @@ config. Nothing is ever injected into a prompt: agents pull what they need.
   `extract-state/`.
 
 ```sh
-atlas memory browse   # entries by kind, search, history
-atlas memory index    # embed every memory, index the project's documents
+atlas-cli memory browse   # entries by kind, search, history
+atlas-cli memory index# embed every memory, index the project's documents
 ```
 
 ## Session capture
@@ -123,19 +132,19 @@ Capture happens per event, as the agent works:
    links each commit to the session and turn that wrote it.
 
 Every event reaches the cloud Project within seconds: the hook writes the store
-and syncs, or hands the event to `atlas serve`, or spools it while the desktop
+and syncs, or hands the event to `atlas-cli serve`, or spools it while the desktop
 app has the folder open. A hook never fails the agent; problems go to
-`atlas status`.
+`atlas-cli status`.
 
 ```sh
-atlas sync on         # a background listener your agents' hooks keep alive
-atlas serve           # the same in the foreground, with a live feed of hook events
+atlas-cli sync on     # a background listener your agents' hooks keep alive
+atlas-cli serve       # the same in the foreground, with a live feed of hook events
 ```
 
 ## Agents
 
-`atlas agents add <agent>` writes the hook and the memory server into the
-agent's own config in the project; `atlas agents remove` takes them out.
+`atlas-cli agents add <agent>` writes the hook and the memory server into the
+agent's own config in the project; `atlas-cli agents remove` takes them out.
 Nothing is wrapped and no environment variable changes.
 
 | agent | hook written to | memory server written to |
@@ -149,7 +158,7 @@ Nothing is wrapped and no environment variable changes.
 | `antigravity` Antigravity (`agy`) | `.agents/hooks.json` | `.agents/mcp_config.json` |
 | `pi` Pi | `.pi/extensions/atlas/index.ts`, once the project is trusted | `.pi/mcp.json` |
 
-Keep `atlas` current on `PATH`, including `~/.local/bin`, which some agents put
+Keep `atlas-cli` current on `PATH`, including `~/.local/bin`, which some agents put
 first.
 
 ## Commands
@@ -159,19 +168,20 @@ colour only for status) and prints plain text to pipes and scripts.
 
 | command | what |
 |---|---|
-| `atlas` | the overview: logo, commands by group |
-| `atlas login` · `logout` · `whoami` | sign in with the device grant; the session file is the only secret kept (mode 0600) |
-| `atlas org list \| use \| create` | organisations |
-| `atlas init` | bind the folder, hook the agents, choose background sync and memory search |
-| `atlas settings` | everything on one screen |
-| `atlas status` | sign-in, Project, capture health, commits linked, sync, memory, agents |
-| `atlas agents add \| remove \| list \| sessions` | the hooks and memory entry per agent; the sessions seen |
-| `atlas sync [on \| off]` | background sync |
-| `atlas serve` | the Project's listener: memory server, sync drain, receiver of hook events |
-| `atlas memory browse \| list \| index \| verify \| export \| import` | shared memory |
-| `atlas memory enable \| disable` | the shared-memory gate for this repository |
-| `atlas capture enable \| disable \| sync \| retry \| link` | the capture gate; sync now, retry failed rows, link commits |
-| `atlas update [--check] [--version vX.Y.Z]` | replace this binary with a release, checksum verified |
+| `atlas-cli` | the overview: logo, commands by group |
+| `atlas-cli login` · `logout` · `whoami` | sign in with the device grant; the session file is the only secret kept (mode 0600) |
+| `atlas-cli org list \| use \| create` | organisations |
+| `atlas-cli init` | bind the folder, hook the agents, choose background sync and memory search |
+| `atlas-cli settings` | everything on one screen |
+| `atlas-cli status` | sign-in, Project, capture health, commits linked, sync, memory, agents |
+| `atlas-cli agents add \| remove \| list \| sessions` | the hooks and memory entry per agent; the sessions seen |
+| `atlas-cli sync [on \| off]` | background sync |
+| `atlas-cli serve` | the Project's listener: memory server, sync drain, receiver of hook events |
+| `atlas-cli memory browse \| list \| index \| verify \| export \| import` | shared memory |
+| `atlas-cli memory enable \| disable` | the shared-memory gate for this repository |
+| `atlas-cli capture enable \| disable \| sync \| retry \| link` | the capture gate; sync now, retry failed rows, link commits |
+| `atlas-cli update [--check] [--version vX.Y.Z]` | replace this binary with a release, checksum verified |
+| `atlas-cli uninstall [--yes] [--keep-binary]` | remove Atlas's hooks from every Project, stop the listeners, delete the CLI's state and the binary; `.atlas/` and the sign-in stay |
 
 ## What lives where
 
@@ -203,8 +213,8 @@ folders; memory is never injected into prompts; an `Authorization` header is
 never logged; every stored text passes the redactor; no secret persists except
 the session token file.
 
-The ACP path of v0.1 (`atlas run <agent>`) is parked under the hidden
-`atlas acp` group.
+The ACP path of v0.1 (`atlas-cli run <agent>`) is parked under the hidden
+`atlas-cli acp` group.
 
 ## License
 

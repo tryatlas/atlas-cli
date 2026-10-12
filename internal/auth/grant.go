@@ -14,7 +14,7 @@ const (
 // Grant errors, with the desktop's user-facing wording.
 var (
 	ErrGrantDenied    = errors.New("connection denied in the browser")
-	ErrGrantExpired   = errors.New("that code expired; run atlas login again to get a new one")
+	ErrGrantExpired   = errors.New("that code expired; run atlas-cli login again to get a new one")
 	ErrGrantCancelled = errors.New("sign-in cancelled")
 )
 

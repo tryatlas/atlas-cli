@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install the atlas CLI from a GitHub release, verifying its sha256.
+# Install the atlas-cli binary from a GitHub release, verifying its sha256.
 #
 #   curl -fsSL https://github.com/tryatlas/atlas-cli/releases/latest/download/install.sh | sh
 #
@@ -16,7 +16,7 @@ set -eu
 repo="tryatlas/atlas-cli"
 dir="${ATLAS_INSTALL_DIR:-$HOME/.local/bin}"
 
-fail() { echo "atlas install: $*" >&2; exit 1; }
+fail() { echo "atlas-cli install: $*" >&2; exit 1; }
 
 case "$(uname -s)" in
   Linux) os=linux ;;
@@ -66,9 +66,9 @@ if [ -z "$version" ]; then
   [ -n "$version" ] || fail "could not find the latest release (a private repository needs the GitHub CLI: gh auth login)"
 fi
 plain="${version#v}"
-archive="atlas_${plain}_${os}_${arch}.tar.gz"
+archive="atlas-cli_${plain}_${os}_${arch}.tar.gz"
 
-echo "Downloading atlas $version for $os/$arch…"
+echo "Downloading atlas-cli $version for $os/$arch…"
 if [ "$use_gh" = yes ]; then
   gh release download "$version" -R "$repo" -D "$tmp" -p "$archive" -p checksums.txt ||
     fail "download failed: $archive from $repo $version"
@@ -83,11 +83,15 @@ want="$(grep " $archive\$" "$tmp/checksums.txt" | cut -d' ' -f1)"
 got="$(sha "$tmp/$archive")"
 [ "$got" = "$want" ] || fail "checksum mismatch for $archive (got $got, want $want)"
 
-tar -xzf "$tmp/$archive" -C "$tmp" atlas
+tar -xzf "$tmp/$archive" -C "$tmp" atlas-cli
 mkdir -p "$dir"
-install -m 0755 "$tmp/atlas" "$dir/atlas"
-echo "Installed $("$dir/atlas" --version 2>/dev/null || echo "atlas $version") to $dir/atlas"
+install -m 0755 "$tmp/atlas-cli" "$dir/atlas-cli"
+echo "Installed $("$dir/atlas-cli" --version 2>/dev/null || echo "atlas-cli $version") to $dir/atlas-cli"
+# Releases up to v0.4.0 named the binary atlas; drop it so only one copy remains.
+if [ -f "$dir/atlas" ] && "$dir/atlas" --version 2>/dev/null | grep -q '^atlas '; then
+  rm -f "$dir/atlas" && echo "Removed the old $dir/atlas (the command is now atlas-cli)."
+fi
 case ":$PATH:" in
   *":$dir:"*) ;;
-  *) echo "Add $dir to your PATH to run atlas." ;;
+  *) echo "Add $dir to your PATH to run atlas-cli." ;;
 esac

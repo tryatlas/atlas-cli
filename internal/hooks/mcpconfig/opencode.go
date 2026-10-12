@@ -21,7 +21,7 @@ func init() {
 func opencodeEntry(root string) json.RawMessage {
 	return hooks.Raw(map[string]any{
 		"type":    "local",
-		"command": append([]string{"atlas"}, Args(root, opencodeID)...),
+		"command": append([]string{hooks.Bin}, Args(root, opencodeID)...),
 		"enabled": true,
 	})
 }

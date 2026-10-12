@@ -20,10 +20,10 @@ var (
 	updateTarget = update.Executable
 )
 
-// atlas update: replace this binary with the latest release (or --version),
+// atlas-cli update: replace this binary with the latest release (or --version),
 // verified against the release's checksums.txt like the installer does.
 func newUpdateCmd() *cobra.Command {
-	c := withRun(leaf("update", "Update atlas to the latest release (verified against the release checksums)", cobra.NoArgs), runUpdate)
+	c := withRun(leaf("update", "Update atlas-cli to the latest release (verified against the release checksums)", cobra.NoArgs), runUpdate)
 	c.Flags().Bool("check", false, "only say whether a newer release exists")
 	c.Flags().String("version", "", "install this release tag instead of the latest (e.g. v0.3.4)")
 	return c
@@ -44,9 +44,9 @@ func runUpdate(cmd *cobra.Command, _ []string) error {
 		}
 		return err
 	}
-	title := "Updating atlas"
+	title := "Updating atlas-cli"
 	if check {
-		title = "Checking for a newer atlas"
+		title = "Checking for a newer atlas-cli"
 	}
 	return tui.Work(out, title, func(step tui.StepFunc) (string, error) {
 		return applyUpdate(ctx, func(label, value string) { step(label + "  " + value) }, want, check)
@@ -69,10 +69,10 @@ func applyUpdate(ctx context.Context, step func(label, value string), want strin
 	step("Installed", version)
 	step("Release", tag)
 	if want == "" && !update.Newer(version, tag) {
-		return fmt.Sprintf("atlas %s is up to date.", version), nil
+		return fmt.Sprintf("atlas-cli %s is up to date.", version), nil
 	}
 	if check {
-		return fmt.Sprintf("atlas %s is available; run atlas update.", tag), nil
+		return fmt.Sprintf("atlas-cli %s is available; run atlas-cli update.", tag), nil
 	}
 	exe, err := updateTarget()
 	if err != nil {
@@ -85,13 +85,13 @@ func applyUpdate(ctx context.Context, step func(label, value string), want strin
 	}
 	step("Verified", update.Archive(tag, runtime.GOOS, runtime.GOARCH)+" (sha256)")
 	if err := update.Replace(exe, bin); err != nil {
-		return "", fmt.Errorf("%w (reinstall with the installer, or run atlas update with write access to %s)", err, exe)
+		return "", fmt.Errorf("%w (reinstall with the installer, or run atlas-cli update with write access to %s)", err, exe)
 	}
 	step("Replaced", exe)
 	if note := restartListener(ctx); note != "" {
 		step("Listener", note)
 	}
-	return fmt.Sprintf("Updated atlas %s → %s.", version, tag), nil
+	return fmt.Sprintf("Updated atlas-cli %s → %s.", version, tag), nil
 }
 
 // restartListener puts this Project's background listener on the new
@@ -110,7 +110,7 @@ func restartListener(ctx context.Context) string {
 		return ""
 	}
 	if !rf.Daemon {
-		return "a foreground atlas serve still runs the old version; restart it"
+		return "a foreground atlas-cli serve still runs the old version; restart it"
 	}
 	if _, err := haltListener(p.Root); err != nil {
 		return "could not stop the old listener: " + err.Error()

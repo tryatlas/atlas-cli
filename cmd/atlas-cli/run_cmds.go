@@ -67,7 +67,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if !h.Capturing() {
-		fmt.Fprintln(stderr, "atlas: capture is off for this run: another Atlas window is recording this Project")
+		fmt.Fprintln(stderr, "atlas-cli: capture is off for this run: another Atlas window is recording this Project")
 	}
 	tty := interactive()
 	view := &headless{out: stdout, err: stderr, yes: yes, tty: tty, in: bufio.NewReader(cmd.InOrStdin())}

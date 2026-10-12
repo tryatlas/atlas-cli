@@ -1,4 +1,4 @@
-// Package settings is the settings screen (atlas settings): account,
+// Package settings is the settings screen (atlas-cli settings): account,
 // Project gates, agent integrations and background sync, in one place. The
 // screen only draws and routes keys; a Backend reads and changes the state.
 package settings

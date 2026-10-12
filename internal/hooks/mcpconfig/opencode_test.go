@@ -57,7 +57,7 @@ func TestOpenCodeWriter(t *testing.T) {
 		t.Fatalf("other server lost: %s", b)
 	}
 	e := cfg.MCP[ServerName]
-	want := []string{"atlas", "mcp-bridge", "--project", root, "--agent", "opencode"}
+	want := []string{"atlas-cli", "mcp-bridge", "--project", root, "--agent", "opencode"}
 	if e.Type != "local" || !e.Enabled || len(e.Command) != len(want) {
 		t.Fatalf("entry %+v", e)
 	}

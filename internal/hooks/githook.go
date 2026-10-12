@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// The git post-commit hook: it asks atlas to link captured sessions to the
-// new commit (atlas hooks git post-commit). An existing hook is kept as
+// The git post-commit hook: it asks atlas-cli to link captured sessions to the
+// new commit (atlas-cli hooks git post-commit). An existing hook is kept as
 // <hook>.pre-atlas and chained after Atlas's part.
 
 // GitHookMarker identifies a hook file Atlas wrote.
@@ -22,11 +22,11 @@ const GitHookMarker = "# Atlas CLI hook"
 // gitHooks are the hooks Atlas installs.
 var gitHooks = []string{"post-commit"}
 
-// gitHookScript is the hook body: run atlas if present, then the hook that
+// gitHookScript is the hook body: run atlas-cli if present, then the hook that
 // was there before, if any.
 func gitHookScript(name string) string {
 	return "#!/bin/sh\n" + GitHookMarker + "\n" +
-		"if command -v atlas >/dev/null 2>&1; then atlas hooks git " + name + " \"$@\" </dev/null >/dev/null 2>&1 || true; fi\n" +
+		"if command -v " + Bin + " >/dev/null 2>&1; then " + Prefix + "git " + name + " \"$@\" </dev/null >/dev/null 2>&1 || true; fi\n" +
 		"if [ -x \"$(dirname \"$0\")/" + name + ".pre-atlas\" ]; then exec \"$(dirname \"$0\")/" + name + ".pre-atlas\" \"$@\"; fi\n"
 }
 

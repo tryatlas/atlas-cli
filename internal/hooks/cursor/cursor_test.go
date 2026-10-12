@@ -49,7 +49,7 @@ func TestInstallIntoEmptyProject(t *testing.T) {
 	}
 	for _, h := range installed {
 		list := hs[h.Event]
-		if len(list) != 1 || list[0]["command"] != hooks.Wrap("atlas hooks cursor "+h.Verb) {
+		if len(list) != 1 || list[0]["command"] != hooks.Wrap("atlas-cli hooks cursor "+h.Verb) {
 			t.Fatalf("%s: %v", h.Event, list)
 		}
 		if _, ok := list[0]["matcher"]; ok {
@@ -76,10 +76,10 @@ func TestInstallKeepsUserHooksAndPrunesStale(t *testing.T) {
   "hooks": {
     "sessionStart": [
       {"command": "echo mine", "matcher": "x"},
-      {"command": "` + hooks.Wrap("atlas hooks cursor old-verb") + `"}
+      {"command": "` + hooks.Wrap("atlas-cli hooks cursor old-verb") + `"}
     ],
     "afterFileEdit": [{"command": "./lint.sh"}],
-    "preToolUse": [{"command": "atlas hooks cursor pre-tool-use"}]
+    "preToolUse": [{"command": "atlas-cli hooks cursor pre-tool-use"}]
   }
 }`
 	if err := os.MkdirAll(filepath.Dir(HooksPath(root)), 0o755); err != nil {

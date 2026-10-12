@@ -34,8 +34,8 @@ func (b *Backoff) Next(retryAfter time.Duration) time.Duration {
 // Reset clears the backoff after a good pass.
 func (b *Backoff) Reset() { b.cur = 0 }
 
-// Runner drains one Project's store in the background of atlas run and
-// atlas serve.
+// Runner drains one Project's store in the background of atlas-cli run and
+// atlas-cli serve.
 type Runner struct {
 	Client *Client
 	Store  *store.Store
@@ -59,7 +59,7 @@ func (r *Runner) Force() {
 	}
 }
 
-// RetryFailed requeues failed rows and forces a drain (atlas capture retry).
+// RetryFailed requeues failed rows and forces a drain (atlas-cli capture retry).
 func (r *Runner) RetryFailed(ctx context.Context) (int64, error) {
 	n, err := r.Store.RetryFailed(ctx)
 	if err == nil {

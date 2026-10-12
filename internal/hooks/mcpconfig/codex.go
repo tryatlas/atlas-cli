@@ -47,7 +47,7 @@ func codexBlock(root string) string {
 	}
 	return codexBegin + "\n" +
 		codexHeader + "\n" +
-		"command = " + tomlString("atlas") + "\n" +
+		"command = " + tomlString(hooks.Bin) + "\n" +
 		"args = [" + strings.Join(args, ", ") + "]\n" +
 		codexEnd + "\n"
 }

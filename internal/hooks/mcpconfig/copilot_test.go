@@ -50,7 +50,7 @@ func TestCopilotWriterWritesALocalServerAndKeepsTheRest(t *testing.T) {
 		t.Fatal(err)
 	}
 	e, ok := file.Servers[ServerName]
-	if !ok || e.Type != "local" || e.Command != "atlas" || len(e.Tools) != 1 || e.Tools[0] != "*" {
+	if !ok || e.Type != "local" || e.Command != "atlas-cli" || len(e.Tools) != 1 || e.Tools[0] != "*" {
 		t.Fatalf("%s", b)
 	}
 	if want := []string{"mcp-bridge", "--project", root, "--agent", "copilot"}; len(e.Args) != len(want) || e.Args[2] != root || e.Args[4] != "copilot" {

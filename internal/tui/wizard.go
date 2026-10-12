@@ -10,7 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Step places one question in a numbered flow (atlas init): the header
+// Step places one question in a numbered flow (atlas-cli init): the header
 // shows where the user is, and the answered step collapses to one line.
 type Step struct {
 	N, Total int

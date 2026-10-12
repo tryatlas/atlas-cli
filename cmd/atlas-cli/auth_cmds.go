@@ -110,7 +110,7 @@ func runWhoami(cmd *cobra.Command, _ []string) error {
 			s = r
 		}
 		if rerr != nil {
-			fmt.Fprintln(cmd.ErrOrStderr(), "atlas: could not refresh:", rerr)
+			fmt.Fprintln(cmd.ErrOrStderr(), "atlas-cli: could not refresh:", rerr)
 		}
 	}
 	printIdentity(cmd.OutOrStdout(), s, a.Store.Path())
@@ -134,7 +134,7 @@ func runOrgList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if err != nil {
-		fmt.Fprintln(cmd.ErrOrStderr(), "atlas: showing the stored list; could not refresh:", err)
+		fmt.Fprintln(cmd.ErrOrStderr(), "atlas-cli: showing the stored list; could not refresh:", err)
 	}
 	printOrgs(cmd.OutOrStdout(), s)
 	return nil
@@ -159,7 +159,7 @@ func runOrgUse(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	if s.ActiveOrgID() != id {
-		fmt.Fprintf(cmd.ErrOrStderr(), "atlas: %s is not in your organisation list; pinned anyway. Run atlas org list to refresh it.\n", id)
+		fmt.Fprintf(cmd.ErrOrStderr(), "atlas-cli: %s is not in your organisation list; pinned anyway. Run atlas-cli org list to refresh it.\n", id)
 	}
 	tui.Done(out, "Active organisation: "+orgLabel(s, id))
 	return nil
@@ -203,9 +203,9 @@ func runOrgCreate(cmd *cobra.Command, args []string) error {
 		}
 		step("refreshing your organisations")
 		if _, err := a.Refresh(ctx); err != nil && !errors.Is(err, auth.ErrSignedOut) {
-			fmt.Fprintln(cmd.ErrOrStderr(), "atlas: created, but could not refresh the list:", err)
+			fmt.Fprintln(cmd.ErrOrStderr(), "atlas-cli: created, but could not refresh the list:", err)
 		}
-		return fmt.Sprintf("Created %s (%s). Run atlas org use %s to make it active.", created.Name, created.ID, created.ID), nil
+		return fmt.Sprintf("Created %s (%s). Run atlas-cli org use %s to make it active.", created.Name, created.ID, created.ID), nil
 	})
 }
 
@@ -227,7 +227,7 @@ func printIdentity(w io.Writer, s *auth.Session, path string) {
 			tui.Field(w, "Email", id.Email)
 			tui.Field(w, "User id", tui.Default.Faint.Render(id.ID))
 		} else {
-			tui.Field(w, "Profile", "not fetched yet (atlas whoami --refresh)")
+			tui.Field(w, "Profile", "not fetched yet (atlas-cli whoami --refresh)")
 		}
 		printOrgs(w, s)
 		tui.Section(w, "On this machine")
@@ -237,7 +237,7 @@ func printIdentity(w io.Writer, s *auth.Session, path string) {
 	if id := s.Identity; id != nil {
 		fmt.Fprintf(w, "Signed in as %s <%s> (%s)\n", id.Name, id.Email, id.ID)
 	} else {
-		fmt.Fprintln(w, "Signed in (profile not fetched yet; run atlas whoami --refresh)")
+		fmt.Fprintln(w, "Signed in (profile not fetched yet; run atlas-cli whoami --refresh)")
 	}
 	printOrgs(w, s)
 	fmt.Fprintf(w, "Session file: %s\n", path)

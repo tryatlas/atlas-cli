@@ -45,7 +45,7 @@ func TestDroidWriter(t *testing.T) {
 		t.Fatalf("user server lost: %v", servers)
 	}
 	atlas := servers[ServerName]
-	if atlas["type"] != "stdio" || atlas["command"] != "atlas" {
+	if atlas["type"] != "stdio" || atlas["command"] != "atlas-cli" {
 		t.Fatalf("entry: %v", atlas)
 	}
 	args, _ := json.Marshal(atlas["args"])

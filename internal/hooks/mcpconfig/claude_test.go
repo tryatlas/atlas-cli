@@ -35,7 +35,7 @@ func TestClaudeWriterAddsAndRemoves(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := obj.Servers[ServerName]
-	if e.Type != "stdio" || e.Command != "atlas" || strings.Join(e.Args, " ") != "mcp-bridge --project "+root+" --agent claude-code" || obj.Servers["other"].Command != "x" {
+	if e.Type != "stdio" || e.Command != "atlas-cli" || strings.Join(e.Args, " ") != "mcp-bridge --project "+root+" --agent claude-code" || obj.Servers["other"].Command != "x" {
 		t.Fatalf("%+v", obj)
 	}
 	local, _ := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))

@@ -84,19 +84,19 @@ func TestInstallIntoEmpty(t *testing.T) {
 		t.Fatal("enabled should be absent on a fresh install")
 	}
 	if len(e.PreToolUse) != 1 || e.PreToolUse[0].Matcher != "*" || len(e.PreToolUse[0].Hooks) != 1 ||
-		e.PreToolUse[0].Hooks[0].Command != hooks.Wrap("atlas hooks antigravity pre-tool-use") ||
+		e.PreToolUse[0].Hooks[0].Command != hooks.Wrap("atlas-cli hooks antigravity pre-tool-use") ||
 		e.PreToolUse[0].Hooks[0].Type != "command" {
 		t.Fatalf("PreToolUse = %+v", e.PreToolUse)
 	}
 	if len(e.PostToolUse) != 1 || e.PostToolUse[0].Matcher != "*" || len(e.PostToolUse[0].Hooks) != 1 ||
-		e.PostToolUse[0].Hooks[0].Command != hooks.Wrap("atlas hooks antigravity post-tool-use") ||
+		e.PostToolUse[0].Hooks[0].Command != hooks.Wrap("atlas-cli hooks antigravity post-tool-use") ||
 		e.PostToolUse[0].Hooks[0].Type != "command" {
 		t.Fatalf("PostToolUse = %+v", e.PostToolUse)
 	}
-	if len(e.PreInvocation) != 1 || e.PreInvocation[0].Command != hooks.Wrap("atlas hooks antigravity pre-invocation") {
+	if len(e.PreInvocation) != 1 || e.PreInvocation[0].Command != hooks.Wrap("atlas-cli hooks antigravity pre-invocation") {
 		t.Fatalf("PreInvocation = %+v", e.PreInvocation)
 	}
-	if len(e.Stop) != 1 || e.Stop[0].Command != hooks.Wrap("atlas hooks antigravity stop") || e.Stop[0].Timeout != 300 {
+	if len(e.Stop) != 1 || e.Stop[0].Command != hooks.Wrap("atlas-cli hooks antigravity stop") || e.Stop[0].Timeout != 300 {
 		t.Fatalf("Stop = %+v", e.Stop)
 	}
 	for _, h := range []string{e.PreToolUse[0].Hooks[0].Command, e.PostToolUse[0].Hooks[0].Command, e.PreInvocation[0].Command, e.Stop[0].Command} {
@@ -119,7 +119,7 @@ func TestInstallKeepsOtherEntriesAndDisabled(t *testing.T) {
 	root := t.TempDir()
 	writeHooks(t, root, `{
   "my-linter": {"PostToolUse": [{"matcher": "write_to_file", "hooks": [{"type": "command", "command": "lint"}]}]},
-  "atlas": {"enabled": false, "Stop": [{"type": "command", "command": "sh -c 'exec atlas hooks antigravity old-verb'"}]}
+  "atlas": {"enabled": false, "Stop": [{"type": "command", "command": "sh -c 'exec atlas-cli hooks antigravity old-verb'"}]}
 }`)
 	a := Agent{}
 	if a.State(root) != hooks.Outdated {
@@ -140,7 +140,7 @@ func TestInstallKeepsOtherEntriesAndDisabled(t *testing.T) {
 	if e.Enabled == nil || *e.Enabled {
 		t.Fatal("the user's enabled:false was not kept")
 	}
-	if len(e.Stop) != 1 || e.Stop[0].Command != hooks.Wrap("atlas hooks antigravity stop") {
+	if len(e.Stop) != 1 || e.Stop[0].Command != hooks.Wrap("atlas-cli hooks antigravity stop") {
 		t.Fatalf("old Stop hook survived: %+v", e.Stop)
 	}
 	if len(e.PreToolUse) != 1 || len(e.PostToolUse) != 1 || len(e.PreInvocation) != 1 {
@@ -183,7 +183,7 @@ func TestStateOutdatedOnExtraHooks(t *testing.T) {
 	file := readHooks(t, root)
 	var e entry
 	_ = json.Unmarshal(file[Key], &e)
-	e.PostInvocation = []plainHandler{{Type: "command", Command: hooks.Wrap("atlas hooks antigravity post-invocation")}}
+	e.PostInvocation = []plainHandler{{Type: "command", Command: hooks.Wrap("atlas-cli hooks antigravity post-invocation")}}
 	file[Key] = hooks.Raw(e)
 	if err := hooks.SaveJSON(HooksPath(root), file, 0o644); err != nil {
 		t.Fatal(err)

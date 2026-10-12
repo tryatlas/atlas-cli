@@ -74,7 +74,7 @@ func TestInstallUninstall(t *testing.T) {
 	if got := commands(start); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("SessionStart commands:\n got %q\nwant %q", got, want)
 	}
-	if !strings.Contains(want[1], `printf "%s\n" "Atlas is enabled here but atlas is not installed or not on PATH."`) {
+	if !strings.Contains(want[1], `printf "%s\n" "Atlas is enabled here but atlas-cli is not installed or not on PATH."`) {
 		t.Fatalf("plain-text missing message: %s", want[1])
 	}
 	if got := commands(hk["Stop"]); len(got) != 1 || got[0] != hooks.Wrap(hooks.Command(ID, VerbStop)) {

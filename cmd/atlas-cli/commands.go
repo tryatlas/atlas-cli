@@ -20,14 +20,14 @@ func stub(cmd *cobra.Command, _ []string) error {
 
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "atlas",
+		Use:           "atlas-cli",
 		Short:         "Shared memory and session capture for coding agents",
-		Long:          "atlas gives every coding agent run in a folder Atlas shared memory and session capture,\nusing the same on-disk formats as the Atlas desktop app.",
+		Long:          "atlas-cli gives every coding agent run in a folder Atlas shared memory and session capture,\nusing the same on-disk formats as the Atlas desktop app.",
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.SetVersionTemplate("atlas {{.Version}}\n")
+	root.SetVersionTemplate("atlas-cli {{.Version}}\n")
 	root.SetHelpFunc(styledHelp(root.HelpFunc()))
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
 		if !interactive() {
@@ -49,6 +49,7 @@ func newRootCmd() *cobra.Command {
 		newSyncCmd(),
 		newSettingsCmd(),
 		newUpdateCmd(),
+		newUninstallCmd(),
 		withRun(leaf("status", "Show login, organisation, Project, gates, capture health and agent integrations", cobra.NoArgs), runStatus),
 		newAgentsCmd(),
 		newHooksCmd(),
@@ -66,10 +67,10 @@ var splashGroups = []struct {
 	{"Start", []string{"login", "init", "status", "settings"}},
 	{"Agents", []string{"agents", "sync"}},
 	{"Memory and capture", []string{"memory", "capture"}},
-	{"Account", []string{"whoami", "org", "logout", "update"}},
+	{"Account", []string{"whoami", "org", "logout", "update", "uninstall"}},
 }
 
-// splash is `atlas` alone on a terminal.
+// splash is `atlas-cli` alone on a terminal.
 func splash(cmd *cobra.Command) {
 	groups := map[string][]tui.Command{}
 	var order []string
@@ -134,9 +135,9 @@ func newInitCmd() *cobra.Command {
 	c.Flags().String("visibility", "org", "who sees a new Project: org or restricted")
 	c.Flags().Bool("local", false, "bind locally only; nothing is synced")
 	c.Flags().Bool("yes", false, "do not prompt for confirmation")
-	c.Flags().StringSlice("agents", nil, "hook these agents (comma-separated ids, atlas agents list); skips the agent step")
+	c.Flags().StringSlice("agents", nil, "hook these agents (comma-separated ids, atlas-cli agents list); skips the agent step")
 	c.Flags().Bool("all-agents", false, "hook every agent detected on this machine; skips the agent step")
-	c.Flags().String("sync", "", "background sync: on or off (atlas sync); skips the sync step")
+	c.Flags().String("sync", "", "background sync: on or off (atlas-cli sync); skips the sync step")
 	c.MarkFlagsMutuallyExclusive("agents", "all-agents")
 	c.MarkFlagsMutuallyExclusive("project", "create")
 	c.MarkFlagsMutuallyExclusive("local", "project")
@@ -170,7 +171,7 @@ func newCaptureCmd() *cobra.Command {
 func newServeCmd() *cobra.Command {
 	c := withRun(leaf("serve", "Run the Project's listener: memory server, sync drain, and the receiver of agent hooks", cobra.NoArgs), runServe)
 	c.Flags().Bool("daemon", false, "start the listener detached")
-	c.Flags().Bool("stop", false, "stop a detached listener (atlas sync off also keeps hooks from restarting it)")
+	c.Flags().Bool("stop", false, "stop a detached listener (atlas-cli sync off also keeps hooks from restarting it)")
 	c.Flags().Duration("import-every", 0, "ACP import of native sessions this often (parked; 0: never)")
 	_ = c.Flags().MarkHidden("import-every")
 	c.MarkFlagsMutuallyExclusive("daemon", "stop")
@@ -202,7 +203,7 @@ func commandPaths(root *cobra.Command) []string {
 }
 
 func newMemoryListCmd() *cobra.Command {
-	c := withRun(leaf("list", "Print shared memory entries (for scripts; atlas memory browse on a terminal)", cobra.NoArgs), runMemoryList)
+	c := withRun(leaf("list", "Print shared memory entries (for scripts; atlas-cli memory browse on a terminal)", cobra.NoArgs), runMemoryList)
 	c.Flags().String("kind", "", "only this kind: plan, file_changed, decision, fact, failure, architecture, preference")
 	c.Flags().String("search", "", "search instead of listing")
 	c.Flags().Bool("all", false, "include candidates (unconfirmed memories), as the app shows them")

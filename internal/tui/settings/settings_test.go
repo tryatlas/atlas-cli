@@ -20,7 +20,7 @@ func (f *fake) Load(context.Context) ([]Section, error) {
 		{Title: "Account", Items: []Item{{Label: "Signed in as", Value: "Ada <ada@example.com>"}}},
 		{Title: "Agents", Items: []Item{
 			{Key: "agent:codex", Label: "Codex", Kind: Toggle, On: f.on["agent:codex"], Detail: "Capture Codex sessions"},
-			{Key: "agent:pi", Label: "Pi", Kind: Toggle, Disabled: "Run atlas init in this folder first."},
+			{Key: "agent:pi", Label: "Pi", Kind: Toggle, Disabled: "Run atlas-cli init in this folder first."},
 			{Key: "agents:all", Label: "Add all detected agents", Kind: Action},
 		}},
 	}, nil
@@ -83,7 +83,7 @@ func TestSettingsScreen(t *testing.T) {
 	}
 	key(m, tea.KeyDown, "")
 	key(m, tea.KeySpace, " ") // disabled: explains, applies nothing
-	if len(f.applied) != 1 || !strings.Contains(ansiRE.ReplaceAllString(m.View().Content, ""), "atlas init") {
+	if len(f.applied) != 1 || !strings.Contains(ansiRE.ReplaceAllString(m.View().Content, ""), "atlas-cli init") {
 		t.Fatalf("%v", f.applied)
 	}
 	key(m, tea.KeyDown, "")

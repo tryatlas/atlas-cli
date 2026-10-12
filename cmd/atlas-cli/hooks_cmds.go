@@ -33,13 +33,13 @@ import (
 	_ "github.com/tryatlas/atlas-cli/internal/hooks/pi"
 )
 
-// atlas hooks <agent> <verb> is what the installed agent hooks run; atlas
+// atlas-cli hooks <agent> <verb> is what the installed agent hooks run; atlas
 // hooks git <hook> is what the git hooks run. Both are hidden, read their
 // payload on stdin, never block the agent, and never exit non-zero: an error
-// goes to hooks.log in the CLI state directory and shows in atlas status
+// goes to hooks.log in the CLI state directory and shows in atlas-cli status
 // (ADR-0013 §4).
 func newHooksCmd() *cobra.Command {
-	root := &cobra.Command{Use: "hooks", Short: "Entry points for agent and git hooks (installed by atlas agents add)", Hidden: true, Args: cobra.NoArgs}
+	root := &cobra.Command{Use: "hooks", Short: "Entry points for agent and git hooks (installed by atlas-cli agents add)", Hidden: true, Args: cobra.NoArgs}
 	for _, a := range hooks.All() {
 		ag := &cobra.Command{Use: a.ID(), Short: a.Name() + " hooks", Hidden: true, Args: cobra.NoArgs}
 		for _, verb := range a.Verbs() {
@@ -110,7 +110,7 @@ func runAgentHook(a hooks.Agent, verb string) func(*cobra.Command, []string) err
 	}
 }
 
-// spawnExtract starts `atlas hooks extract` detached: the model call can take
+// spawnExtract starts `atlas-cli hooks extract` detached: the model call can take
 // a minute, and the agent must not wait on it.
 func spawnExtract(root, agent, session string, final bool) {
 	self, err := os.Executable()
@@ -172,7 +172,7 @@ func runHookExtract(cmd *cobra.Command, _ []string) error {
 
 // syncAfterHook sends what a direct hook write just recorded to the cloud,
 // within the drain's short budget, so a turn reaches the Project without
-// waiting for atlas serve or atlas capture sync. Offline or signed out it
+// waiting for atlas-cli serve or atlas-cli capture sync. Offline or signed out it
 // does nothing; the rows stay pending for the next drain.
 func syncAfterHook(ctx context.Context, st *store.Store, d hooks.Delivery) {
 	b, err := st.Binding(ctx)
@@ -254,4 +254,4 @@ func runGitPostCommit(cmd *cobra.Command, _ []string) error {
 var _ io.Writer = io.Discard
 
 // errNoProject is returned by agent commands run outside a Project.
-var errNoProject = fmt.Errorf("this folder is not an Atlas Project; run atlas init first")
+var errNoProject = fmt.Errorf("this folder is not an Atlas Project; run atlas-cli init first")

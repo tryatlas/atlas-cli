@@ -24,7 +24,7 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/memory/server"
 )
 
-// Delivery routes (ADR-0013 §5): a running atlas serve holds the writer
+// Delivery routes (ADR-0013 §5): a running atlas-cli serve holds the writer
 // lock, so a hook posts to its Unix socket; otherwise the hook takes the lock
 // and writes itself; when the desktop app holds the lock the turn is spooled
 // and the next writer drains it.
@@ -37,7 +37,7 @@ func SpoolDir(root string) string { return filepath.Join(Dir(root), "spool") }
 
 // Deliver is the default Dispatcher.Deliver. afterDirect, when set, runs
 // after a direct write with the store still open: the caller syncs the new
-// rows to the cloud there, so a turn does not wait for the next atlas serve.
+// rows to the cloud there, so a turn does not wait for the next atlas-cli serve.
 func Deliver(version string, afterDirect func(ctx context.Context, st *store.Store, d Delivery)) func(ctx context.Context, d Delivery) error {
 	return func(ctx context.Context, d Delivery) error {
 		if rf := listener.ReadRunFile(d.Root); rf != nil {

@@ -23,7 +23,7 @@ func fakeRelease(t *testing.T, tag string, bin []byte) {
 	var arch bytes.Buffer
 	zw := gzip.NewWriter(&arch)
 	tw := tar.NewWriter(zw)
-	_ = tw.WriteHeader(&tar.Header{Name: "atlas", Mode: 0o755, Size: int64(len(bin)), Typeflag: tar.TypeReg})
+	_ = tw.WriteHeader(&tar.Header{Name: "atlas-cli", Mode: 0o755, Size: int64(len(bin)), Typeflag: tar.TypeReg})
 	_, _ = tw.Write(bin)
 	_ = tw.Close()
 	_ = zw.Close()
@@ -60,24 +60,24 @@ func TestUpdate(t *testing.T) {
 	version = "0.4.0"
 
 	code, out, e := runCmd(t, "update", "--check")
-	if code != 0 || !strings.Contains(out, "atlas v9.0.0 is available") {
+	if code != 0 || !strings.Contains(out, "atlas-cli v9.0.0 is available") {
 		t.Fatalf("exit %d: %s %s", code, out, e)
 	}
 	if b, _ := os.ReadFile(exe); string(b) != "atlas old" {
 		t.Fatal("--check must not replace")
 	}
 	code, out, e = runCmd(t, "update")
-	if code != 0 || !strings.Contains(out, "Updated atlas 0.4.0 → v9.0.0.") || !strings.Contains(out, "Verified:") {
+	if code != 0 || !strings.Contains(out, "Updated atlas-cli 0.4.0 → v9.0.0.") || !strings.Contains(out, "Verified:") {
 		t.Fatalf("exit %d: %s %s", code, out, e)
 	}
 	if b, _ := os.ReadFile(exe); string(b) != "atlas 9" {
 		t.Fatalf("binary = %q", b)
 	}
 	version = "9.0.0"
-	if code, out, _ := runCmd(t, "update"); code != 0 || !strings.Contains(out, "atlas 9.0.0 is up to date.") {
+	if code, out, _ := runCmd(t, "update"); code != 0 || !strings.Contains(out, "atlas-cli 9.0.0 is up to date.") {
 		t.Fatal(out)
 	}
-	if code, _, e := runCmd(t, "update", "--version", "8.0.0"); code != 1 || !strings.Contains(e, "atlas_8.0.0_") {
+	if code, _, e := runCmd(t, "update", "--version", "8.0.0"); code != 1 || !strings.Contains(e, "atlas-cli_8.0.0_") {
 		t.Fatalf("a missing release must fail: %d %s", code, e)
 	}
 }

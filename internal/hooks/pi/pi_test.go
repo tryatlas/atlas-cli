@@ -26,7 +26,7 @@ func TestInstallStateUninstall(t *testing.T) {
 	if !strings.HasPrefix(string(b), "// Atlas extension for Pi — written by atlas agents add; do not edit (rewritten on the next add).\n") {
 		t.Fatalf("header missing:\n%s", b[:120])
 	}
-	for _, want := range []string{"exec atlas hooks pi ${verb}", `"session-start"`, `"before-agent-start"`, `"tool-result"`, `"agent-end"`, `pi.on("tool_result"`, "parentToolCallId", "64 * 1024", "let queue", "ATLAS_PI_NESTED", "command -v atlas", "10_000"} {
+	for _, want := range []string{"exec atlas-cli hooks pi ${verb}", `"session-start"`, `"before-agent-start"`, `"tool-result"`, `"agent-end"`, `pi.on("tool_result"`, "parentToolCallId", "64 * 1024", "let queue", "ATLAS_PI_NESTED", "command -v atlas", "10_000"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("extension lacks %q", want)
 		}

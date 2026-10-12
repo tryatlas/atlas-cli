@@ -128,13 +128,13 @@ func enabledStore(t *testing.T, root string) *store.Store {
 
 func TestWrapperOwnership(t *testing.T) {
 	cmd := Wrap(Command("claude-code", "stop"))
-	if !strings.Contains(cmd, "exec atlas hooks claude-code stop'") || !Owned(cmd) {
+	if !strings.Contains(cmd, "exec atlas-cli hooks claude-code stop'") || !Owned(cmd) {
 		t.Fatalf("wrap: %s", cmd)
 	}
-	if !Owned("atlas hooks x y") || Owned("atlas status") || Owned("sh -c 'exec entire hooks x y'") {
-		t.Fatal("ownership is by the atlas hooks prefix only")
+	if !Owned("atlas-cli hooks x y") || Owned("atlas-cli status") || Owned("sh -c 'exec entire hooks x y'") {
+		t.Fatal("ownership is by the atlas-cli hooks prefix only")
 	}
-	if m := WrapWithMessage("atlas hooks a b", MissingMessage); !strings.Contains(m, `printf "%s\n"`) || !Owned(m) {
+	if m := WrapWithMessage("atlas-cli hooks a b", MissingMessage); !strings.Contains(m, `printf "%s\n"`) || !Owned(m) {
 		t.Fatalf("message wrapper: %s", m)
 	}
 }
@@ -144,7 +144,7 @@ func TestClaudeShapedInstallKeepsUserHooksAndPrunesStale(t *testing.T) {
 	a := fakeAgent{}
 	p := filepath.Join(root, ".fake", "settings.json")
 	_ = os.MkdirAll(filepath.Dir(p), 0o755)
-	user := `{"theme":"dark","hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"echo mine"},{"type":"command","command":"atlas hooks fake old-verb"}]}],"Other":[{"hooks":[{"type":"command","command":"atlas hooks fake gone"}]}]}}`
+	user := `{"theme":"dark","hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"echo mine"},{"type":"command","command":"atlas-cli hooks fake old-verb"}]}],"Other":[{"hooks":[{"type":"command","command":"atlas-cli hooks fake gone"}]}]}}`
 	_ = os.WriteFile(p, []byte(user), 0o600)
 	if a.State(root) != Outdated {
 		t.Fatalf("state with stale entries = %v", a.State(root))
@@ -155,7 +155,7 @@ func TestClaudeShapedInstallKeepsUserHooksAndPrunesStale(t *testing.T) {
 	}
 	b, _ := os.ReadFile(p)
 	s := string(b)
-	for _, want := range []string{`"theme": "dark"`, `echo mine`, `exec atlas hooks fake start'`, `exec atlas hooks fake stop'`} {
+	for _, want := range []string{`"theme": "dark"`, `echo mine`, `exec atlas-cli hooks fake start'`, `exec atlas-cli hooks fake stop'`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q in\n%s", want, s)
 		}
@@ -175,7 +175,7 @@ func TestClaudeShapedInstallKeepsUserHooksAndPrunesStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ = os.ReadFile(p)
-	if strings.Contains(string(b), "atlas hooks") || !strings.Contains(string(b), "echo mine") {
+	if strings.Contains(string(b), "atlas-cli hooks") || !strings.Contains(string(b), "echo mine") {
 		t.Fatalf("uninstall: %s", b)
 	}
 	if a.State(root) != Absent {
@@ -459,7 +459,7 @@ func TestGitHooksInstallChainsAndRestores(t *testing.T) {
 		t.Fatalf("backup = %q", b)
 	}
 	b, _ = os.ReadFile(mine)
-	if !strings.Contains(string(b), "atlas hooks git post-commit") || !strings.Contains(string(b), "post-commit.pre-atlas") {
+	if !strings.Contains(string(b), "atlas-cli hooks git post-commit") || !strings.Contains(string(b), "post-commit.pre-atlas") {
 		t.Fatalf("hook = %s", b)
 	}
 	if changed, _ := InstallGitHooks(ctx, root); changed {
@@ -620,5 +620,23 @@ func TestCommittingAFileWrittenBeforeTheTurnGetsItsCheckpoint(t *testing.T) {
 	var files string
 	if err := st.DB().QueryRow(`SELECT files_touched FROM checkpoint`).Scan(&files); err != nil || !strings.Contains(files, "greet.js") {
 		t.Fatalf("checkpoint files = %q %v", files, err)
+	}
+}
+
+func TestOwnedKnowsHooksFromBeforeTheRename(t *testing.T) {
+	for _, c := range []string{
+		Command("claude-code", "stop"),
+		Wrap(Command("claude-code", "stop")),
+		"atlas hooks claude-code stop",
+		"sh -c 'if ! command -v atlas >/dev/null 2>&1; then exit 0; fi; exec atlas hooks claude-code stop'",
+	} {
+		if !Owned(c) {
+			t.Errorf("not owned: %s", c)
+		}
+	}
+	for _, c := range []string{"atlas-cli status", "atlas status", "echo atlas hooks"} {
+		if Owned(c) {
+			t.Errorf("owned: %s", c)
+		}
 	}
 }

@@ -1,8 +1,8 @@
 // Atlas plugin for OpenCode — written by atlas agents add; do not edit (rewritten on the next add).
 //
 // Forwards OpenCode's session lifecycle, and each completed tool call, to
-// `atlas hooks opencode <verb>` with one JSON payload on stdin. node:child_process runs under Bun (the CLI and
-// TUI) and Node (the desktop sidecar). A machine without atlas on PATH runs a
+// `atlas-cli hooks opencode <verb>` with one JSON payload on stdin. node:child_process runs under Bun (the CLI and
+// TUI) and Node (the desktop sidecar). A machine without atlas-cli on PATH runs a
 // silent no-op, and nothing here throws: a failing hook never fails OpenCode.
 import { spawn, spawnSync } from "node:child_process"
 import type { Plugin } from "@opencode-ai/plugin"
@@ -20,7 +20,7 @@ export const AtlasPlugin: Plugin = async ({ directory }) => {
   const MAX_OUTPUT = 64 * 1024 // bytes of tool output (and of metadata) a payload carries
 
   function argv(verb: string): string[] {
-    return ["sh", "-c", `if ! command -v atlas >/dev/null 2>&1; then exit 0; fi; exec atlas hooks opencode ${verb}`]
+    return ["sh", "-c", `if ! command -v atlas-cli >/dev/null 2>&1; then exit 0; fi; exec atlas-cli hooks opencode ${verb}`]
   }
 
   // send runs a hook in the background; its exit is never waited for.

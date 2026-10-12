@@ -19,7 +19,7 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/tui"
 )
 
-// atlas agents: the agents that run in their own UIs and report to Atlas
+// atlas-cli agents: the agents that run in their own UIs and report to Atlas
 // through their hooks (ADR-0013). add writes the hook into the agent's
 // config in this Project and the atlas_memory entry into its MCP config;
 // remove takes both out; list shows every supported agent's state.
@@ -57,7 +57,7 @@ func resolveAgents(args []string, all bool, pick func(hooks.Agent) bool) ([]hook
 			}
 		}
 		if len(out) == 0 {
-			return nil, errors.New("no agent matched; atlas agents list shows them")
+			return nil, errors.New("no agent matched; atlas-cli agents list shows them")
 		}
 		return out, nil
 	}
@@ -65,7 +65,7 @@ func resolveAgents(args []string, all bool, pick func(hooks.Agent) bool) ([]hook
 	for _, id := range args {
 		a, ok := hooks.Get(id)
 		if !ok {
-			return nil, fmt.Errorf("%s is not a supported agent (atlas agents list)", id)
+			return nil, fmt.Errorf("%s is not a supported agent (atlas-cli agents list)", id)
 		}
 		out = append(out, a)
 	}
@@ -97,9 +97,9 @@ func runAgentsAdd(cmd *cobra.Command, args []string) error {
 	}
 	if interactive() {
 		fmt.Fprintln(out)
-		tui.Note(out, "Use the agents as usual in "+p.Root+"; sessions are captured as they run. atlas status shows them.")
+		tui.Note(out, "Use the agents as usual in "+p.Root+"; sessions are captured as they run. atlas-cli status shows them.")
 	} else {
-		fmt.Fprintf(out, "Use the agents as usual in %s; sessions are captured as they run. atlas status shows them.\n", p.Root)
+		fmt.Fprintf(out, "Use the agents as usual in %s; sessions are captured as they run. atlas-cli status shows them.\n", p.Root)
 	}
 	return nil
 }
@@ -241,12 +241,12 @@ func runAgentsList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if root == "" {
-		fmt.Fprintln(cmd.OutOrStdout(), "Not in an Atlas Project: run atlas init, then atlas agents add <agent>.")
+		fmt.Fprintln(cmd.OutOrStdout(), "Not in an Atlas Project: run atlas-cli init, then atlas-cli agents add <agent>.")
 	}
 	return nil
 }
 
-// agentsTable is atlas agents list on a terminal.
+// agentsTable is atlas-cli agents list on a terminal.
 func agentsTable(out io.Writer, root string) error {
 	tui.Header(out, "agents")
 	fmt.Fprintln(out)
@@ -277,9 +277,9 @@ func agentsTable(out io.Writer, root string) error {
 	fmt.Fprint(out, tui.Table([]string{"agent", "id", "binary", "hook", "memory"}, rows))
 	fmt.Fprintln(out)
 	if root == "" {
-		tui.Note(out, "Not in an Atlas Project: run atlas init, then atlas agents add <agent>.")
+		tui.Note(out, "Not in an Atlas Project: run atlas-cli init, then atlas-cli agents add <agent>.")
 	} else {
-		tui.Note(out, "atlas agents add <id> · atlas agents add --all · atlas settings")
+		tui.Note(out, "atlas-cli agents add <id> · atlas-cli agents add --all · atlas-cli settings")
 	}
 	return nil
 }
@@ -354,7 +354,7 @@ func ago(t time.Time) string {
 	return t.Format("2006-01-02")
 }
 
-// printAgents is the Agents line of atlas status: per agent, hook and
+// printAgents is the Agents line of atlas-cli status: per agent, hook and
 // memory state in this Project, and the last hook error if any.
 func printAgents(ctx context.Context, w io.Writer, root string) {
 	var on []string
@@ -365,7 +365,7 @@ func printAgents(ctx context.Context, w io.Writer, root string) {
 		}
 		s := a.ID()
 		if st == hooks.Outdated {
-			s += " (hook outdated: atlas agents add " + a.ID() + ")"
+			s += " (hook outdated: atlas-cli agents add " + a.ID() + ")"
 		}
 		if mw, ok := mcpconfig.For(a.ID()); ok && mw.State(root) != hooks.Current {
 			s += " (no memory entry)"
@@ -373,12 +373,12 @@ func printAgents(ctx context.Context, w io.Writer, root string) {
 		on = append(on, s)
 	}
 	if len(on) == 0 {
-		fmt.Fprintln(w, "Agents:    none hooked here (atlas agents add <agent>)")
+		fmt.Fprintln(w, "Agents:    none hooked here (atlas-cli agents add <agent>)")
 		return
 	}
 	fmt.Fprintf(w, "Agents:    %s\n", strings.Join(on, ", "))
 	if hooks.GitHooksState(ctx, root) != hooks.Current {
-		fmt.Fprintln(w, "Git hook:  post-commit not installed (atlas agents add <agent> installs it)")
+		fmt.Fprintln(w, "Git hook:  post-commit not installed (atlas-cli agents add <agent> installs it)")
 	}
 	if states, _ := hooks.ListStates(root, ""); len(states) > 0 {
 		live, spooled := 0, 0

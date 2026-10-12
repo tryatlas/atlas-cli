@@ -1,6 +1,6 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
-BIN     := bin/atlas
+BIN     := bin/atlas-cli
 
 # Pure Go: no cgo anywhere (SQLite is modernc.org/sqlite).
 export CGO_ENABLED := 0
@@ -10,7 +10,7 @@ export CGO_ENABLED := 0
 all: fmt lint test build
 
 build:
-	go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/atlas
+	go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/atlas-cli
 
 test:
 	go test -timeout 5m ./...

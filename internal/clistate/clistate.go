@@ -12,10 +12,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-// Dir is the CLI's state directory for a Project root.
-func Dir(root string) string {
+// Base is the CLI's whole state directory: $XDG_STATE_HOME/atlas-cli.
+func Base() string {
 	base := os.Getenv("XDG_STATE_HOME")
 	if !filepath.IsAbs(base) {
 		home, err := os.UserHomeDir()
@@ -24,8 +25,27 @@ func Dir(root string) string {
 		}
 		base = filepath.Join(home, ".local", "state")
 	}
+	return filepath.Join(base, "atlas-cli")
+}
+
+// Dir is the CLI's state directory for a Project root.
+func Dir(root string) string {
 	sum := sha256.Sum256([]byte(root))
-	return filepath.Join(base, "atlas-cli", "projects", hex.EncodeToString(sum[:])[:16])
+	return filepath.Join(Base(), "projects", hex.EncodeToString(sum[:])[:16])
+}
+
+// Roots lists the Project roots the CLI has kept state for, from each
+// directory's root file.
+func Roots() []string {
+	ents, _ := os.ReadDir(filepath.Join(Base(), "projects"))
+	var out []string
+	for _, e := range ents {
+		b, err := os.ReadFile(filepath.Join(Base(), "projects", e.Name(), "root"))
+		if r := strings.TrimSpace(string(b)); err == nil && filepath.IsAbs(r) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // Ensure creates the directory (0700: it holds typed prompts) and its root

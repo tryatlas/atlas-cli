@@ -3,16 +3,16 @@
 # the same archives locally without publishing.
 version: 2
 
-project_name: atlas
+project_name: atlas-cli
 
 before:
   hooks:
     - go mod tidy -diff
 
 builds:
-  - id: atlas
-    main: ./cmd/atlas
-    binary: atlas
+  - id: atlas-cli
+    main: ./cmd/atlas-cli
+    binary: atlas-cli
     env:
       - CGO_ENABLED=0
     flags:
@@ -27,9 +27,9 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
-  - id: atlas
+  - id: atlas-cli
     formats: [tar.gz]
-    name_template: "atlas_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "atlas-cli_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
       - LICENSE*

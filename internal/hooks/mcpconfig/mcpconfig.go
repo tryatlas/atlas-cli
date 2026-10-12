@@ -1,7 +1,7 @@
 // Package mcpconfig writes the atlas_memory MCP server into each agent's own
 // MCP configuration so a session run in the agent's UI reaches shared memory
 // (ADR-0013 §6, SPEC §7.3). The entry is a stdio bridge with no secret:
-// atlas mcp-bridge --project <root> --agent <id>.
+// atlas-cli mcp-bridge --project <root> --agent <id>.
 package mcpconfig
 
 import (
@@ -64,10 +64,10 @@ func IDs() []string {
 	return out
 }
 
-// StdioEntry is the common JSON shape {"command":"atlas","args":[…]} with
+// StdioEntry is the common JSON shape {"command":"atlas-cli","args":[…]} with
 // an optional "type":"stdio".
 func StdioEntry(root, agentID string, withType bool) json.RawMessage {
-	m := map[string]any{"command": "atlas", "args": Args(root, agentID)}
+	m := map[string]any{"command": hooks.Bin, "args": Args(root, agentID)}
 	if withType {
 		m["type"] = "stdio"
 	}

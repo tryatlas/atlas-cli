@@ -28,7 +28,7 @@ func TestPluginInstallStateUninstall(t *testing.T) {
 		t.Fatal("the written plugin is not the embedded render")
 	}
 	for _, verb := range a.Verbs() {
-		if !strings.Contains(string(b), `atlas hooks opencode ${verb}`) && !strings.Contains(string(b), `"`+verb+`"`) {
+		if !strings.Contains(string(b), `atlas-cli hooks opencode ${verb}`) && !strings.Contains(string(b), `"`+verb+`"`) {
 			t.Fatalf("plugin does not send %s", verb)
 		}
 	}
@@ -189,7 +189,7 @@ func TestDetectAndMisc(t *testing.T) {
 	if got, ok := hooks.Get(ID); !ok || got.ID() != ID {
 		t.Fatal("not registered")
 	}
-	if !hooks.Owned(`sh -c 'if ! command -v atlas >/dev/null 2>&1; then exit 0; fi; exec atlas hooks opencode turn-end'`) {
+	if !hooks.Owned(`sh -c 'if ! command -v atlas >/dev/null 2>&1; then exit 0; fi; exec atlas-cli hooks opencode turn-end'`) {
 		t.Fatal("the plugin's command shape is not recognised as Atlas's")
 	}
 }

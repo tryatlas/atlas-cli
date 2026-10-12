@@ -36,7 +36,7 @@ const (
 
 // MissingMessage is what Droid shows when the hook is installed but atlas is
 // not. Plain text: Droid prints a hook's stdout as is.
-const MissingMessage = "Atlas is enabled here but atlas is not installed or not on PATH."
+const MissingMessage = "Atlas is enabled here but atlas-cli is not installed or not on PATH."
 
 // ID is the registry key.
 func (Agent) ID() string { return ID }

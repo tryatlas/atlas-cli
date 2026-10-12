@@ -26,11 +26,11 @@ func init() { Register(copilotID, copilotServers) }
 
 var copilotServers = JSONServers{File: ".github/mcp.json", Key: "mcpServers", AgentID: copilotID, Entry: copilotEntry}
 
-// copilotEntry is {"type":"local","command":"atlas","args":[…],"tools":["*"]}.
+// copilotEntry is {"type":"local","command":"atlas-cli","args":[…],"tools":["*"]}.
 func copilotEntry(root string) json.RawMessage {
 	return hooks.Raw(map[string]any{
 		"type":    "local",
-		"command": "atlas",
+		"command": hooks.Bin,
 		"args":    Args(root, copilotID),
 		"tools":   []string{"*"},
 	})

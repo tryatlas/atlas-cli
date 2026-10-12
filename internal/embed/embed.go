@@ -32,7 +32,7 @@ const (
 var Files = []string{"config.json", "tokenizer.json", "model.safetensors"}
 
 // ErrNoModel says the model files are not on this machine.
-var ErrNoModel = errors.New("the memory search model is not downloaded (atlas memory index downloads it)")
+var ErrNoModel = errors.New("the memory search model is not downloaded (atlas-cli memory index downloads it)")
 
 // AppDataDir is the desktop's app data directory (Tauri app_data_dir):
 // macOS ~/Library/Application Support/dev.atlas.ide, Linux

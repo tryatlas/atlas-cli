@@ -85,7 +85,7 @@ func (s *Store) SetEnabled(ctx context.Context, enabled bool, now time.Time) err
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return errors.New("this Project is not bound; run atlas init")
+		return errors.New("this Project is not bound; run atlas-cli init")
 	}
 	return nil
 }
