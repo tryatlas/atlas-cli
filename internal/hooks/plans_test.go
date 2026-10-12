@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	memrecord "github.com/tryatlas/atlas-cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/capture/record"
+	memrecord "github.com/tryatlas/cli/internal/memory/record"
 )
 
 func TestPlanOfEachAgentsPlanTool(t *testing.T) {

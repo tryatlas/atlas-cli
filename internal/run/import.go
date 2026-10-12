@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/clistate"
+	"github.com/tryatlas/cli/internal/agents/acp"
+	"github.com/tryatlas/cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/clistate"
 )
 
 // Importing sessions run in an agent's own UI (ADR-0012): each installed

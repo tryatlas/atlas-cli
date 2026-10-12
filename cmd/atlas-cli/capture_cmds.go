@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	"github.com/tryatlas/atlas-cli/internal/project"
-	"github.com/tryatlas/atlas-cli/internal/tui"
+	gitlink "github.com/tryatlas/cli/internal/capture/git"
+	"github.com/tryatlas/cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/project"
+	"github.com/tryatlas/cli/internal/tui"
 )
 
 // runCaptureLink walks new commits and links them to captured sessions.

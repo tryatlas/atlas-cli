@@ -3,7 +3,7 @@ package mcpconfig
 import (
 	"encoding/json"
 
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 // GitHub Copilot CLI reads MCP servers from three tiers (docs.github.com,

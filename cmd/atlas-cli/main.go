@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/tryatlas/atlas-cli/internal/tui"
-	"github.com/tryatlas/atlas-cli/internal/update"
+	"github.com/tryatlas/cli/internal/tui"
+	"github.com/tryatlas/cli/internal/update"
 )
 
 // version is set at build time with -ldflags "-X main.version=…".

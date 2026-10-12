@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tryatlas/atlas-cli/internal/tui"
+	"github.com/tryatlas/cli/internal/tui"
 )
 
 // notImplementedError is returned by every command that has not been built yet.

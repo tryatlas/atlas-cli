@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tryatlas/atlas-cli/internal/tui"
+	"github.com/tryatlas/cli/internal/tui"
 )
 
 // styledHelp is --help on a terminal: the wordmark and path, what the

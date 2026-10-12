@@ -14,7 +14,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
+	"github.com/tryatlas/cli/internal/agents/acp"
 )
 
 // Agents is the registry plus the installed map.

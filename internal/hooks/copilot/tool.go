@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/capture/store"
 )
 
 // toolPayload is Copilot's postToolUse input (1.0.95): {sessionId,

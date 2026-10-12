@@ -1,4 +1,4 @@
-module github.com/tryatlas/atlas-cli
+module github.com/tryatlas/cli
 
 go 1.26.0
 

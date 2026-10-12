@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tryatlas/atlas-cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/memory/record"
 )
 
 type fake struct{ searched string }

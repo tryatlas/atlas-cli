@@ -9,10 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tryatlas/atlas-cli/internal/clistate"
-	"github.com/tryatlas/atlas-cli/internal/listener"
-	"github.com/tryatlas/atlas-cli/internal/project"
-	"github.com/tryatlas/atlas-cli/internal/tui"
+	"github.com/tryatlas/cli/internal/clistate"
+	"github.com/tryatlas/cli/internal/listener"
+	"github.com/tryatlas/cli/internal/project"
+	"github.com/tryatlas/cli/internal/tui"
 )
 
 // atlas-cli sync [on|off]: background sync is a running atlas-cli serve for the

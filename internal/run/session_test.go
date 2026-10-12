@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
-	"github.com/tryatlas/atlas-cli/internal/agents/acp/acptest"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	"github.com/tryatlas/atlas-cli/internal/project"
+	"github.com/tryatlas/cli/internal/agents/acp"
+	"github.com/tryatlas/cli/internal/agents/acp/acptest"
+	"github.com/tryatlas/cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/project"
 )
 
 func TestMain(m *testing.M) {

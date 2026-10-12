@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 // reader reads Droid's JSONL transcript: one envelope per line,

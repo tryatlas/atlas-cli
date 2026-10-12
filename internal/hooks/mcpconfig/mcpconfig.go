@@ -9,7 +9,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 // ServerName is the entry's key: the desktop's server name.

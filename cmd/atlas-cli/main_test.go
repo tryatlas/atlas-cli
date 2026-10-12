@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tryatlas/atlas-cli/internal/auth"
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/auth"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 // TestMain keeps every command test away from the real session file and the

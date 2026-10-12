@@ -124,7 +124,7 @@ func TestHoldOuts(t *testing.T) {
 		"request 014df517-39d1-4453-b7b3-9930c563627c done",
 		"func TestRedactAutoWalksJSONLines2(t *testing.T)",
 		"getUserAccountSettings2024Handler",
-		"github.com/tryatlas/atlas-cli/internal/redact/vendor_rules.json",
+		"github.com/tryatlas/cli/internal/redact/vendor_rules.json",
 		"node-v24.11.0-darwin-arm64.tar.gz",
 		"AWS docs use " + cat("AK", "IA", "IOSFODNN7", "EXAMPLE"),
 		"postgres://user:${DB_PASS}@localhost/app",

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/capture/store"
 )
 
 // InstallState is how an agent's Atlas hook config compares to what Install

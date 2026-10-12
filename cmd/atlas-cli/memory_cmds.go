@@ -9,13 +9,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/tryatlas/atlas-cli/internal/hooks"
-	"github.com/tryatlas/atlas-cli/internal/listener"
-	"github.com/tryatlas/atlas-cli/internal/memory/record"
-	"github.com/tryatlas/atlas-cli/internal/memory/server"
-	"github.com/tryatlas/atlas-cli/internal/project"
-	"github.com/tryatlas/atlas-cli/internal/tui"
-	"github.com/tryatlas/atlas-cli/internal/tui/memview"
+	"github.com/tryatlas/cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/listener"
+	"github.com/tryatlas/cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/memory/server"
+	"github.com/tryatlas/cli/internal/project"
+	"github.com/tryatlas/cli/internal/tui"
+	"github.com/tryatlas/cli/internal/tui/memview"
 )
 
 // openRecord opens the shared-memory record of the repository around the cwd.

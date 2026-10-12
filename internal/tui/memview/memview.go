@@ -12,8 +12,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/tryatlas/atlas-cli/internal/memory/record"
-	"github.com/tryatlas/atlas-cli/internal/tui"
+	"github.com/tryatlas/cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/tui"
 )
 
 var th = tui.Default

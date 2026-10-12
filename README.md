@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/tryatlas/atlas-cli/releases/latest"><img src="https://img.shields.io/github/v/release/tryatlas/atlas-cli?color=000000&labelColor=000000&style=flat-square" alt="Latest release"></a>
+  <a href="https://github.com/tryatlas/cli/releases/latest"><img src="https://img.shields.io/github/v/release/tryatlas/cli?color=000000&labelColor=000000&style=flat-square" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/go-pure%2C%20no%20cgo-000000?labelColor=000000&style=flat-square" alt="Pure Go">
   <img src="https://img.shields.io/badge/macOS%20·%20Linux-000000?labelColor=000000&style=flat-square" alt="macOS and Linux">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-000000?labelColor=000000&style=flat-square" alt="Apache-2.0"></a>
@@ -39,7 +39,7 @@ in a terminal on a server, or both.
 macOS (Apple silicon, Intel) and Linux (amd64, arm64):
 
 ```sh
-curl -fsSL https://github.com/tryatlas/atlas-cli/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/tryatlas/cli/releases/latest/download/install.sh | sh
 ```
 
 The installer verifies the archive's sha256 and puts `atlas-cli` in `~/.local/bin`

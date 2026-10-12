@@ -20,9 +20,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/clistate"
-	"github.com/tryatlas/atlas-cli/internal/memory/server"
-	"github.com/tryatlas/atlas-cli/internal/timefmt"
+	"github.com/tryatlas/cli/internal/clistate"
+	"github.com/tryatlas/cli/internal/memory/server"
+	"github.com/tryatlas/cli/internal/timefmt"
 )
 
 // RunFile is the Project's run.json in the CLI state directory while a

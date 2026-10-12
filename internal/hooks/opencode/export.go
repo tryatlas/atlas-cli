@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 // OpenCode keeps its sessions in its own database, never in a file the

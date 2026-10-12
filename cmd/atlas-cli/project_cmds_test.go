@@ -13,8 +13,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	"github.com/tryatlas/atlas-cli/internal/project"
+	"github.com/tryatlas/cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/project"
 )
 
 // fakeIngest records requests and answers from a route table.

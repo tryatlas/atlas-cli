@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 // Codex: MCP servers live in TOML under [mcp_servers.<name>]. The project's

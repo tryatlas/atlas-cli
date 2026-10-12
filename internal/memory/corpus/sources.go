@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	capstore "github.com/tryatlas/atlas-cli/internal/capture/store"
-	memrecord "github.com/tryatlas/atlas-cli/internal/memory/record"
+	capstore "github.com/tryatlas/cli/internal/capture/store"
+	memrecord "github.com/tryatlas/cli/internal/memory/record"
 )
 
 // The desktop's caps on durable memories per kind (shared_memory.rs

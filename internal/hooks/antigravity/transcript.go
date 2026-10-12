@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 // reader reads agy's step JSONL transcript

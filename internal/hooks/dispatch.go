@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/capture/store"
 )
 
 // Dispatcher runs one hook invocation for one Project.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 func TestParse(t *testing.T) {

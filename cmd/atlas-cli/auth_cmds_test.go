@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tryatlas/atlas-cli/internal/auth"
+	"github.com/tryatlas/cli/internal/auth"
 )
 
 // installFakeAuth points every command at a scripted auth host and a temp store.

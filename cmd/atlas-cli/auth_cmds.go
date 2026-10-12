@@ -13,8 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tryatlas/atlas-cli/internal/auth"
-	"github.com/tryatlas/atlas-cli/internal/tui"
+	"github.com/tryatlas/cli/internal/auth"
+	"github.com/tryatlas/cli/internal/tui"
 )
 
 // newAuth is replaced in tests.

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	"github.com/tryatlas/atlas-cli/internal/redact"
+	"github.com/tryatlas/cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/redact"
 )
 
 // A turn captured through an agent's hooks (ADR-0013): the hook read the

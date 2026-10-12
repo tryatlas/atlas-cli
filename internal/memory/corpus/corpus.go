@@ -24,8 +24,8 @@ import (
 
 	"github.com/zeebo/blake3"
 
-	"github.com/tryatlas/atlas-cli/internal/embed"
-	memrecord "github.com/tryatlas/atlas-cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/embed"
+	memrecord "github.com/tryatlas/cli/internal/memory/record"
 )
 
 // File is the index's database inside .atlas/memory/.

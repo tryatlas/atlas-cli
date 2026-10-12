@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
+	"github.com/tryatlas/cli/internal/agents/acp"
 )
 
 // fakeAgents launches the scripted agent instead of a registry agent.

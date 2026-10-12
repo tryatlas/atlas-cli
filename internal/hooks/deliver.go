@@ -16,12 +16,12 @@ import (
 	"sort"
 	"time"
 
-	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	"github.com/tryatlas/atlas-cli/internal/listener"
-	memrecord "github.com/tryatlas/atlas-cli/internal/memory/record"
-	"github.com/tryatlas/atlas-cli/internal/memory/server"
+	gitlink "github.com/tryatlas/cli/internal/capture/git"
+	"github.com/tryatlas/cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/listener"
+	memrecord "github.com/tryatlas/cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/memory/server"
 )
 
 // Delivery routes (ADR-0013 §5): a running atlas-cli serve holds the writer

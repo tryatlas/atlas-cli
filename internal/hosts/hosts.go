@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Build-time overrides, set with -ldflags "-X github.com/tryatlas/atlas-cli/internal/hosts.buildAuth=…"
+// Build-time overrides, set with -ldflags "-X github.com/tryatlas/cli/internal/hosts.buildAuth=…"
 // (the desktop's option_env! rung, used for staging builds).
 var (
 	buildAuth   string

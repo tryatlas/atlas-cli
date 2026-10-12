@@ -13,24 +13,24 @@ import (
 
 	"github.com/spf13/cobra"
 
-	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	capsync "github.com/tryatlas/atlas-cli/internal/capture/sync"
-	"github.com/tryatlas/atlas-cli/internal/hooks"
-	"github.com/tryatlas/atlas-cli/internal/hosts"
-	"github.com/tryatlas/atlas-cli/internal/listener"
-	"github.com/tryatlas/atlas-cli/internal/memory/extract"
-	"github.com/tryatlas/atlas-cli/internal/project"
+	gitlink "github.com/tryatlas/cli/internal/capture/git"
+	"github.com/tryatlas/cli/internal/capture/store"
+	capsync "github.com/tryatlas/cli/internal/capture/sync"
+	"github.com/tryatlas/cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hosts"
+	"github.com/tryatlas/cli/internal/listener"
+	"github.com/tryatlas/cli/internal/memory/extract"
+	"github.com/tryatlas/cli/internal/project"
 
 	// The agent integrations register themselves.
-	_ "github.com/tryatlas/atlas-cli/internal/hooks/antigravity"
-	_ "github.com/tryatlas/atlas-cli/internal/hooks/claude"
-	_ "github.com/tryatlas/atlas-cli/internal/hooks/codex"
-	_ "github.com/tryatlas/atlas-cli/internal/hooks/copilot"
-	_ "github.com/tryatlas/atlas-cli/internal/hooks/cursor"
-	_ "github.com/tryatlas/atlas-cli/internal/hooks/droid"
-	_ "github.com/tryatlas/atlas-cli/internal/hooks/opencode"
-	_ "github.com/tryatlas/atlas-cli/internal/hooks/pi"
+	_ "github.com/tryatlas/cli/internal/hooks/antigravity"
+	_ "github.com/tryatlas/cli/internal/hooks/claude"
+	_ "github.com/tryatlas/cli/internal/hooks/codex"
+	_ "github.com/tryatlas/cli/internal/hooks/copilot"
+	_ "github.com/tryatlas/cli/internal/hooks/cursor"
+	_ "github.com/tryatlas/cli/internal/hooks/droid"
+	_ "github.com/tryatlas/cli/internal/hooks/opencode"
+	_ "github.com/tryatlas/cli/internal/hooks/pi"
 )
 
 // atlas-cli hooks <agent> <verb> is what the installed agent hooks run; atlas

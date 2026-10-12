@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	memrecord "github.com/tryatlas/atlas-cli/internal/memory/record"
+	memrecord "github.com/tryatlas/cli/internal/memory/record"
 )
 
 type bag struct{}

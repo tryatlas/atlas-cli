@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/embed"
+	"github.com/tryatlas/cli/internal/embed"
 )
 
 // bagOfWords is a deterministic stand-in for the model: a hashed bag of

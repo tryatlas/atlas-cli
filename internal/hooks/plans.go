@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	memrecord "github.com/tryatlas/atlas-cli/internal/memory/record"
-	"github.com/tryatlas/atlas-cli/internal/memory/server"
+	"github.com/tryatlas/cli/internal/capture/record"
+	memrecord "github.com/tryatlas/cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/memory/server"
 )
 
 // planMaxRunes caps a plan as the ACP session does.

@@ -12,14 +12,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/tryatlas/atlas-cli/internal/auth"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	"github.com/tryatlas/atlas-cli/internal/clistate"
-	"github.com/tryatlas/atlas-cli/internal/embed"
-	"github.com/tryatlas/atlas-cli/internal/hooks"
-	"github.com/tryatlas/atlas-cli/internal/hooks/mcpconfig"
-	"github.com/tryatlas/atlas-cli/internal/project"
-	"github.com/tryatlas/atlas-cli/internal/tui/settings"
+	"github.com/tryatlas/cli/internal/auth"
+	"github.com/tryatlas/cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/clistate"
+	"github.com/tryatlas/cli/internal/embed"
+	"github.com/tryatlas/cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hooks/mcpconfig"
+	"github.com/tryatlas/cli/internal/project"
+	"github.com/tryatlas/cli/internal/tui/settings"
 )
 
 // atlas-cli settings: account, Project gates, agents and background sync on

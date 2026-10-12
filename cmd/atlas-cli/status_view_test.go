@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/tryatlas/atlas-cli/internal/tui"
+	"github.com/tryatlas/cli/internal/tui"
 )
 
 func TestStatusDots(t *testing.T) {

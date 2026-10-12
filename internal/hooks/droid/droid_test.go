@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 func loadHooks(t *testing.T, root string) (map[string]json.RawMessage, map[string][]hooks.Matcher) {

@@ -17,18 +17,18 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tryatlas/atlas-cli/internal/auth"
-	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	capsync "github.com/tryatlas/atlas-cli/internal/capture/sync"
-	"github.com/tryatlas/atlas-cli/internal/clistate"
-	"github.com/tryatlas/atlas-cli/internal/hooks"
-	"github.com/tryatlas/atlas-cli/internal/hosts"
-	"github.com/tryatlas/atlas-cli/internal/ingest"
-	"github.com/tryatlas/atlas-cli/internal/listener"
-	"github.com/tryatlas/atlas-cli/internal/project"
-	atlasrun "github.com/tryatlas/atlas-cli/internal/run"
-	"github.com/tryatlas/atlas-cli/internal/tui"
+	"github.com/tryatlas/cli/internal/auth"
+	gitlink "github.com/tryatlas/cli/internal/capture/git"
+	"github.com/tryatlas/cli/internal/capture/store"
+	capsync "github.com/tryatlas/cli/internal/capture/sync"
+	"github.com/tryatlas/cli/internal/clistate"
+	"github.com/tryatlas/cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hosts"
+	"github.com/tryatlas/cli/internal/ingest"
+	"github.com/tryatlas/cli/internal/listener"
+	"github.com/tryatlas/cli/internal/project"
+	atlasrun "github.com/tryatlas/cli/internal/run"
+	"github.com/tryatlas/cli/internal/tui"
 )
 
 // ── atlas-cli capture sync / retry ───────────────────────────────────────────────

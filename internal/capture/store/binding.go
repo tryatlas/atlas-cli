@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/timefmt"
+	"github.com/tryatlas/cli/internal/timefmt"
 )
 
 // Binding modes and drain states (SPEC §6.3).

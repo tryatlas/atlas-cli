@@ -42,4 +42,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/tryatlas/atlas-cli
+        - github.com/tryatlas/cli

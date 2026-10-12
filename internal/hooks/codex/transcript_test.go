@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 // fixture is a two-turn rollout. Turn two starts at line 10.

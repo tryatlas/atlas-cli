@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/memory/record"
-	"github.com/tryatlas/atlas-cli/internal/project"
+	"github.com/tryatlas/cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/project"
 )
 
 // Name is the server name the desktop uses; agent config files register the

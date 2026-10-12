@@ -25,7 +25,7 @@ import (
 )
 
 // Repo is where releases are published.
-const Repo = "tryatlas/atlas-cli"
+const Repo = "tryatlas/cli"
 
 // maxArchive bounds a download.
 const maxArchive = 128 << 20

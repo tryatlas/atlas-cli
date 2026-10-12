@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/memory/record"
-	"github.com/tryatlas/atlas-cli/internal/project"
+	"github.com/tryatlas/cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/project"
 )
 
 // client drives a bridge over pipes like an agent would.

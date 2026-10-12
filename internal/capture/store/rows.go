@@ -15,7 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/tryatlas/atlas-cli/internal/timefmt"
+	"github.com/tryatlas/cli/internal/timefmt"
 )
 
 // Size limits (SPEC §6.3): payloads strictly larger than SpillBytes go to

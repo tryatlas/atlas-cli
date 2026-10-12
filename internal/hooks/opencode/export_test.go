@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 // fixture is an export shaped like OpenCode 1.19.0's: two turns, the second

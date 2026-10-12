@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	memrecord "github.com/tryatlas/atlas-cli/internal/memory/record"
-	"github.com/tryatlas/atlas-cli/internal/memory/server"
-	"github.com/tryatlas/atlas-cli/internal/project"
+	"github.com/tryatlas/cli/internal/agents/acp"
+	"github.com/tryatlas/cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/capture/store"
+	memrecord "github.com/tryatlas/cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/memory/server"
+	"github.com/tryatlas/cli/internal/project"
 )
 
 // MemoryServerName is the name agents see (SPEC §5.5).

@@ -22,7 +22,7 @@ runner.
   (`ATLAS_INSTALL_DIR`, `ATLAS_VERSION` and `ATLAS_BASE_URL` override).
 
 ```sh
-curl -fsSL https://github.com/tryatlas/atlas-cli/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/tryatlas/cli/releases/latest/download/install.sh | sh
 ```
 
 ## Steps

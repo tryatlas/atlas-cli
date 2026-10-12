@@ -24,10 +24,10 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	"github.com/tryatlas/atlas-cli/internal/clistate"
-	"github.com/tryatlas/atlas-cli/internal/memory/record"
-	"github.com/tryatlas/atlas-cli/internal/project"
+	"github.com/tryatlas/cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/clistate"
+	"github.com/tryatlas/cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/project"
 )
 
 // Gates and limits (the desktop's).

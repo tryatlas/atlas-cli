@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	gitlink "github.com/tryatlas/cli/internal/capture/git"
+	"github.com/tryatlas/cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/capture/store"
 )
 
 // fakeAgent is a Claude-shaped agent whose transcript is a plain JSONL of

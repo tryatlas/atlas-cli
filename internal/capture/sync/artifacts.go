@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/capture/store"
 )
 
 // Artifacts are the ingest payloads (SPEC §6.7, evidence-capture.md §7.2):

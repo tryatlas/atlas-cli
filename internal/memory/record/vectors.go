@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/tryatlas/atlas-cli/internal/embed"
+	"github.com/tryatlas/cli/internal/embed"
 )
 
 // VectorSource embeds text; the record caches what it returns.

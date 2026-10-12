@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tryatlas/atlas-cli/internal/embed"
+	"github.com/tryatlas/cli/internal/embed"
 )
 
 // Revision ops.

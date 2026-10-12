@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/agents/acp"
+	"github.com/tryatlas/cli/internal/capture/record"
 )
 
 func updates(t *testing.T, js ...string) []acp.Update {

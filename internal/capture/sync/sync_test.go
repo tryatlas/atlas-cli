@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/capture/store"
 )
 
 var t0 = time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)

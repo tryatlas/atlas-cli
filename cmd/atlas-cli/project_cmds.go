@@ -15,13 +15,13 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/tryatlas/atlas-cli/internal/auth"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	"github.com/tryatlas/atlas-cli/internal/hosts"
-	"github.com/tryatlas/atlas-cli/internal/ingest"
-	"github.com/tryatlas/atlas-cli/internal/memory/record"
-	"github.com/tryatlas/atlas-cli/internal/project"
-	"github.com/tryatlas/atlas-cli/internal/tui"
+	"github.com/tryatlas/cli/internal/auth"
+	"github.com/tryatlas/cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/hosts"
+	"github.com/tryatlas/cli/internal/ingest"
+	"github.com/tryatlas/cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/project"
+	"github.com/tryatlas/cli/internal/tui"
 )
 
 // Seams replaced in tests.

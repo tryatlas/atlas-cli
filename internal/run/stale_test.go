@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/capture/store"
 )
 
 func TestHostStaleWhenTheStoreIsReplaced(t *testing.T) {

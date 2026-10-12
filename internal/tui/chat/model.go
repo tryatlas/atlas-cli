@@ -17,7 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
+	"github.com/tryatlas/cli/internal/agents/acp"
 )
 
 // state is the session's phase.

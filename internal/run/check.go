@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
+	"github.com/tryatlas/cli/internal/agents/acp"
 )
 
 // CheckResult is one agent's handshake check.

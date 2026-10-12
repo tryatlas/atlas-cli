@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/timefmt"
+	"github.com/tryatlas/cli/internal/timefmt"
 )
 
 // The outbox: rows waiting to drain to the ingest server (SPEC §6.7,

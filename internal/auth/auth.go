@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tryatlas/atlas-cli/internal/hosts"
-	"github.com/tryatlas/atlas-cli/internal/timefmt"
+	"github.com/tryatlas/cli/internal/hosts"
+	"github.com/tryatlas/cli/internal/timefmt"
 )
 
 // ErrSignedOut means there is no usable session file.

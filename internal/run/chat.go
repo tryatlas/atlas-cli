@@ -5,8 +5,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
-	"github.com/tryatlas/atlas-cli/internal/tui/chat"
+	"github.com/tryatlas/cli/internal/agents/acp"
+	"github.com/tryatlas/cli/internal/tui/chat"
 )
 
 // Chat drives the chat screen: one agent process and its current session,

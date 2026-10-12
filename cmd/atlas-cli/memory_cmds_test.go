@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tryatlas/atlas-cli/internal/memory/record"
-	"github.com/tryatlas/atlas-cli/internal/memory/server"
+	"github.com/tryatlas/cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/memory/server"
 )
 
 func bridgeIn(t *testing.T, msgs ...string) {

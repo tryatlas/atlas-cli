@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tryatlas/atlas-cli/internal/clistate"
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/clistate"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 func TestUninstallCleansProjectsStateAndBinary(t *testing.T) {

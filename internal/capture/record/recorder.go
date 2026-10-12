@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	"github.com/tryatlas/atlas-cli/internal/redact"
+	"github.com/tryatlas/cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/redact"
 )
 
 // SourceACP and SourceProxy are agent_session.source values. Proxy-captured

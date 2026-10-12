@@ -3,7 +3,7 @@ package mcpconfig
 import (
 	"encoding/json"
 
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 // OpenCode: opencode.json at the Project root holds "mcp": {name: {type:

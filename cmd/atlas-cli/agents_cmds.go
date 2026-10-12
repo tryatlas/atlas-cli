@@ -13,10 +13,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tryatlas/atlas-cli/internal/hooks"
-	"github.com/tryatlas/atlas-cli/internal/hooks/mcpconfig"
-	"github.com/tryatlas/atlas-cli/internal/project"
-	"github.com/tryatlas/atlas-cli/internal/tui"
+	"github.com/tryatlas/cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hooks/mcpconfig"
+	"github.com/tryatlas/cli/internal/project"
+	"github.com/tryatlas/cli/internal/tui"
 )
 
 // atlas-cli agents: the agents that run in their own UIs and report to Atlas

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	memrecord "github.com/tryatlas/atlas-cli/internal/memory/record"
+	"github.com/tryatlas/cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/capture/store"
+	memrecord "github.com/tryatlas/cli/internal/memory/record"
 )
 
 func TestMain(m *testing.M) {

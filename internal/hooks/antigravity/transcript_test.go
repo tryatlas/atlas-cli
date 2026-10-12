@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/capture/record"
 )
 
 // fixture is the shape of agy 1.x's transcript_full.jsonl: a captured first

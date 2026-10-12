@@ -3,7 +3,7 @@ package mcpconfig
 import (
 	"encoding/json"
 
-	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/cli/internal/hooks"
 )
 
 // Claude Code: .mcp.json at the Project root is the project-scope MCP config;

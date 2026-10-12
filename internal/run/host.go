@@ -10,12 +10,12 @@ import (
 	"os"
 	"time"
 
-	gitlink "github.com/tryatlas/atlas-cli/internal/capture/git"
-	"github.com/tryatlas/atlas-cli/internal/capture/record"
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
-	capsync "github.com/tryatlas/atlas-cli/internal/capture/sync"
-	"github.com/tryatlas/atlas-cli/internal/ingest"
-	"github.com/tryatlas/atlas-cli/internal/listener"
+	gitlink "github.com/tryatlas/cli/internal/capture/git"
+	"github.com/tryatlas/cli/internal/capture/record"
+	"github.com/tryatlas/cli/internal/capture/store"
+	capsync "github.com/tryatlas/cli/internal/capture/sync"
+	"github.com/tryatlas/cli/internal/ingest"
+	"github.com/tryatlas/cli/internal/listener"
 )
 
 // ErrLocked is the desktop (or another atlas) recording this Project.

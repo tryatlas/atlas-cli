@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/capture/store"
 )
 
 // Cadence (SPEC §6.7): a 30 s tick; offline and 429 back off from 30 s,

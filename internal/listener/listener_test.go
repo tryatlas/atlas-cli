@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tryatlas/atlas-cli/internal/memory/server"
+	"github.com/tryatlas/cli/internal/memory/server"
 )
 
 type syncer struct{ forced, retried int }

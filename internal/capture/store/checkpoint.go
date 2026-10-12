@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/timefmt"
+	"github.com/tryatlas/cli/internal/timefmt"
 )
 
 // Cursor is workspace_cursor: the last commit the walk evaluated.

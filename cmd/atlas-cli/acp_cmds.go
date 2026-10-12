@@ -14,8 +14,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
-	atlasrun "github.com/tryatlas/atlas-cli/internal/run"
+	"github.com/tryatlas/cli/internal/agents/acp"
+	atlasrun "github.com/tryatlas/cli/internal/run"
 )
 
 // newACPCmd is the parked ACP path (ADR-0013 §8): the registry, installs,

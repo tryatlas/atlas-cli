@@ -18,11 +18,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
-	"github.com/tryatlas/atlas-cli/internal/project"
-	atlasrun "github.com/tryatlas/atlas-cli/internal/run"
-	"github.com/tryatlas/atlas-cli/internal/tui"
-	"github.com/tryatlas/atlas-cli/internal/tui/chat"
+	"github.com/tryatlas/cli/internal/agents/acp"
+	"github.com/tryatlas/cli/internal/project"
+	atlasrun "github.com/tryatlas/cli/internal/run"
+	"github.com/tryatlas/cli/internal/tui"
+	"github.com/tryatlas/cli/internal/tui/chat"
 )
 
 func newRunCmd() *cobra.Command {

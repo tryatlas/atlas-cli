@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/tryatlas/atlas-cli/internal/tui"
+	"github.com/tryatlas/cli/internal/tui"
 )
 
 // statusGroups puts atlas-cli status's lines under the card's sections.

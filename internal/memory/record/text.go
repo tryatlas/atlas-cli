@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"github.com/tryatlas/atlas-cli/internal/redact"
+	"github.com/tryatlas/cli/internal/redact"
 )
 
 // Clean strips zero-width and bidi controls and the Unicode tag block, and

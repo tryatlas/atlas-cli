@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tryatlas/atlas-cli/internal/capture/store"
+	"github.com/tryatlas/cli/internal/capture/store"
 )
 
 // Rewrites (evidence-capture.md §6.4): a checkpoint whose commit is no

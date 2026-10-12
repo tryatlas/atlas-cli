@@ -9,7 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/tryatlas/atlas-cli/internal/agents/acp"
+	"github.com/tryatlas/cli/internal/agents/acp"
 )
 
 // Info is what the screen shows about the agent and its session.

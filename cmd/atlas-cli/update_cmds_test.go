@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tryatlas/atlas-cli/internal/update"
+	"github.com/tryatlas/cli/internal/update"
 )
 
 func fakeRelease(t *testing.T, tag string, bin []byte) {
