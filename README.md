@@ -2,7 +2,7 @@
   <img src="docs/assets/banner.png" alt="atlas: shared memory and session capture for coding agents" width="100%">
 </p>
 
-<h1 align="center">atlas</h1>
+<h1 align="center">Atlas CLI</h1>
 
 <p align="center">
   <b>Shared memory and session capture for coding agents, from the terminal.</b><br>
