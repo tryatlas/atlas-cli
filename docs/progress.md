@@ -1561,3 +1561,12 @@ what the other wrote.
   every item is completed; each new plan supersedes the last.
   `memory_briefing` gives it to the next session as the active plan.
   Verified live with OpenCode (`todowrite` → the plan entry).
+
+## v0.4.0 release
+
+PR #3 (`feat/tui-memory-search` → main) carries everything since #2 was
+merged at v0.2.0: v0.3.x and the v0.4.0 work above. Before tagging: tests,
+lint and `go mod tidy -diff` clean; `make release-check` and `make snapshot`
+built the four archives and `checksums.txt`, and install.sh installed the
+snapshot from them. README redesigned with the banner
+(`docs/assets/banner.png`).
