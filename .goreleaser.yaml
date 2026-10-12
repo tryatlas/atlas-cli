@@ -25,11 +25,37 @@ builds:
       - darwin_arm64
       - darwin_amd64
     mod_timestamp: "{{ .CommitTimestamp }}"
+  # The same program named atlas, for the updater of v0.4.0 and earlier,
+  # which looks for atlas_<version>_<os>_<arch>.tar.gz holding "atlas". The
+  # binary renames itself to atlas-cli on its first run.
+  - id: atlas-legacy
+    main: ./cmd/atlas-cli
+    binary: atlas
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    targets:
+      - linux_amd64
+      - linux_arm64
+      - darwin_arm64
+      - darwin_amd64
+    mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
   - id: atlas-cli
+    ids: [atlas-cli]
     formats: [tar.gz]
     name_template: "atlas-cli_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE*
+  - id: atlas-legacy
+    ids: [atlas-legacy]
+    formats: [tar.gz]
+    name_template: "atlas_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
       - LICENSE*

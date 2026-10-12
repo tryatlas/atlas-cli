@@ -11,7 +11,9 @@ runner.
   GoReleaser (`.goreleaser.yaml`) builds the four archives
   `atlas-cli_<version>_<os>_<arch>.tar.gz` (binary plus README),
   `checksums.txt` (sha256) and `install.sh`, and opens a **draft** GitHub
-  release with them.
+  release with them. It also builds `atlas_<version>_<os>_<arch>.tar.gz`
+  holding the same program named `atlas`, so the updater of v0.4.0 and
+  earlier can still update; that binary renames itself to `atlas-cli`.
 - The version comes from the tag: GoReleaser sets `main.version` with
   `-X main.version={{ .Version }}`, so `atlas-cli --version` prints
   `atlas-cli 1.2.3`. Local builds use `git describe` (`make build`).

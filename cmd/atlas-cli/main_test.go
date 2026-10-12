@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -159,4 +160,23 @@ func TestVersion(t *testing.T) {
 	if got := stdout.String(); got != "atlas-cli dev\n" {
 		t.Fatalf("stdout = %q", got)
 	}
+}
+
+func TestRenameLegacy(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, "atlas")
+	_ = os.WriteFile(old, []byte("bin"), 0o755)
+	var e bytes.Buffer
+	renameLegacy(old, []string{"hooks", "claude-code", "stop"}, &e)
+	if _, err := os.Stat(old); err != nil || e.Len() != 0 {
+		t.Fatalf("a hook moved the binary: %v %s", err, e.String())
+	}
+	renameLegacy(old, []string{"status"}, &e)
+	if _, err := os.Stat(filepath.Join(dir, "atlas-cli")); err != nil {
+		t.Fatal("not moved to atlas-cli")
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) || !strings.Contains(e.String(), "moved") {
+		t.Fatalf("old binary left: %v %s", err, e.String())
+	}
+	renameLegacy(filepath.Join(dir, "atlas-cli"), nil, &e) // already renamed: nothing to do
 }

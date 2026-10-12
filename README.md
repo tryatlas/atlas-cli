@@ -47,9 +47,10 @@ The installer verifies the archive's sha256 and puts `atlas-cli` in `~/.local/bi
 `atlas-cli update` does the same in place. From source: `make build` (pure Go, no
 cgo).
 
-Coming from a release up to v0.4.0, where the command was `atlas`: run the
-installer again (it removes the old `atlas`), then `atlas-cli agents add --all`
-in each Project to point the agents' hooks at the new name.
+Coming from a release up to v0.4.0, where the command was `atlas`: `atlas
+update` (or the installer) brings the new version, which renames itself to
+`atlas-cli` the first time you run it. Then run `atlas-cli agents add --all` in
+each Project to point the agents' hooks at the new name.
 
 To remove it: `atlas-cli uninstall` takes Atlas's hooks and memory entries out
 of every Project, stops the listeners, and deletes the CLI's state and binary.
