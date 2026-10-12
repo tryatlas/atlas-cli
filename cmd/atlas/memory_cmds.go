@@ -167,6 +167,11 @@ func runMemoryList(cmd *cobra.Command, _ []string) error {
 		for _, h := range hits {
 			es = append(es, h.Entry)
 		}
+	} else if all, _ := cmd.Flags().GetBool("all"); all {
+		// Candidates too, as the app's memory panel shows them.
+		if es, err = st.List(ctx, kind, 10000); err != nil {
+			return err
+		}
 	} else if es, err = st.Active(ctx, kinds...); err != nil {
 		return err
 	}

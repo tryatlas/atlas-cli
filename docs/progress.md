@@ -1283,3 +1283,35 @@ directory.
 Verified: `test-cli` migrated in place (history kept); a fresh Project after
 a hooked Claude turn and an `atlas serve` start/stop has `.atlas/` =
 `.gitignore memory project.json sessions.db sessions.lock`.
+
+## v0.3.3: terminal sessions feed memory like app sessions
+
+Reported: app memory and terminal memory differ. Both use the same file
+(`.atlas/memory/memory.sqlite`, schema v6) and in this repo `atlas memory
+list` matched the app's active entries; the difference was in what each
+side writes for a session. Fixed:
+
+- **Agent ids.** Hook sessions were recorded as `claude-code`, `codex`, …;
+  the app records the same agents under their registry ids. Sessions,
+  memory entries and the MCP bridge now use `claude-acp`, `codex-acp`,
+  `github-copilot-cli`, `factory-droid`, `pi-acp`, `antigravity-acp`
+  (`cursor`, `opencode` unchanged).
+- **Capture candidates.** Lines of the agent's reply carrying the app's
+  markers (`decided to`, `decision:`, `gotcha:`, `doesn't work`, `note:`,
+  `architecture:`, …) become candidates (source `capture`, 0.3).
+- **Handoff note.** At session end the episode is written in the app's
+  HandoffNote shape from the session's active memories, and rewritten after
+  the extractor's final pass.
+- **Extractor.** After a turn (≥ 20 turns and ≥ 3 tool calls since the last
+  pass) and at session end, a detached `atlas hooks extract` asks the Atlas
+  gateway's default model (`/v1/models` `default: true`, glm-5.3-flash today)
+  to distil decisions, facts, failures, architecture and preferences; entries
+  land as source `extractor`. Signed in only; the summariser's `local` mode
+  sends nothing; one pass per session at a time. The excerpt comes from the
+  capture store, which is already redacted.
+- `atlas memory list --all` includes candidates, as the app's panel does.
+
+Verified live (`claude -p` in a fresh Project): `file_changed`, two capture
+candidates, three extractor memories ~40 s later, the handoff with the
+distilled decision and fact, everything as `claude-acp`; in this repo
+`atlas memory list --all` = 202 = the app's store.

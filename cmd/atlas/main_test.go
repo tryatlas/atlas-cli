@@ -46,6 +46,7 @@ var wantCommands = []string{
 	"capture link",
 	"capture retry",
 	"capture sync",
+	"hooks extract",
 	"hooks git post-commit",
 	"init",
 	"login",
@@ -107,7 +108,7 @@ var implemented = map[string]bool{
 	"capture link": true, "capture sync": true, "acp import": true, "capture retry": true, "acp run": true, "memory browse": true, "memory list": true,
 	"acp check": true, "acp detect": true, "acp install": true, "acp list": true, "acp sessions": true, "acp logout": true, "acp uninstall": true,
 	"agents add": true, "agents list": true, "agents remove": true, "agents sessions": true,
-	"hooks git post-commit": true,
+	"hooks extract": true, "hooks git post-commit": true,
 }
 
 func TestStubsReportNotImplemented(t *testing.T) {

@@ -105,6 +105,11 @@ func apply1(ctx context.Context, rec *record.Recorder, mem *server.Server, d Del
 			}
 			if mem != nil {
 				foldChanges(ctx, mem, g, d.Root, d.Turn)
+				for _, it := range d.Turn.Items {
+					if it.Tool == nil && it.Mode != "thinking" {
+						mem.Capture(ctx, g, it.Body)
+					}
+				}
 			}
 		}
 	}

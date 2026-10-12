@@ -161,6 +161,7 @@ func newMemoryListCmd() *cobra.Command {
 	c := withRun(leaf("list", "Print shared memory entries (for scripts; atlas memory browse on a terminal)", cobra.NoArgs), runMemoryList)
 	c.Flags().String("kind", "", "only this kind: plan, file_changed, decision, fact, failure, architecture, preference")
 	c.Flags().String("search", "", "search instead of listing")
+	c.Flags().Bool("all", false, "include candidates (unconfirmed memories), as the app shows them")
 	return c
 }
 

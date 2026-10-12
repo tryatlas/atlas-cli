@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,7 +17,9 @@ import (
 	"github.com/tryatlas/atlas-cli/internal/capture/store"
 	capsync "github.com/tryatlas/atlas-cli/internal/capture/sync"
 	"github.com/tryatlas/atlas-cli/internal/hooks"
+	"github.com/tryatlas/atlas-cli/internal/hosts"
 	"github.com/tryatlas/atlas-cli/internal/listener"
+	"github.com/tryatlas/atlas-cli/internal/memory/extract"
 	"github.com/tryatlas/atlas-cli/internal/project"
 
 	// The agent integrations register themselves.
@@ -43,6 +47,12 @@ func newHooksCmd() *cobra.Command {
 		}
 		root.AddCommand(ag)
 	}
+	extract := &cobra.Command{Use: "extract", Short: "Distil memories from a captured session (run detached by the hooks)", Hidden: true, Args: cobra.NoArgs, RunE: runHookExtract}
+	extract.Flags().String("root", "", "the Project root")
+	extract.Flags().String("agent", "", "the desktop's agent id")
+	extract.Flags().String("session", "", "the agent's session id")
+	extract.Flags().Bool("final", false, "the session ended")
+	root.AddCommand(extract)
 	git := &cobra.Command{Use: "git", Short: "git hooks", Hidden: true, Args: cobra.NoArgs}
 	git.AddCommand(&cobra.Command{Use: "post-commit", Hidden: true, Args: cobra.ArbitraryArgs, RunE: runGitPostCommit})
 	root.AddCommand(git)
@@ -87,8 +97,66 @@ func runAgentHook(a hooks.Agent, verb string) func(*cobra.Command, []string) err
 		if len(out) > 0 {
 			_, _ = cmd.OutOrStdout().Write(out)
 		}
+		if err == nil && (ev.Kind == hooks.TurnEnd || ev.Kind == hooks.SessionEnd) {
+			spawnExtract(p.Root, hooks.RegistryID(a.ID()), ev.SessionID, ev.Kind == hooks.SessionEnd)
+		}
 		return nil
 	}
+}
+
+// spawnExtract starts `atlas hooks extract` detached: the model call can take
+// a minute, and the agent must not wait on it.
+func spawnExtract(root, agent, session string, final bool) {
+	self, err := os.Executable()
+	if err != nil {
+		return
+	}
+	args := []string{"hooks", "extract", "--root", root, "--agent", agent, "--session", session}
+	if final {
+		args = append(args, "--final")
+	}
+	c := exec.Command(self, args...) //nolint:gosec // G204: this binary
+	c.Dir = root
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if c.Start() == nil {
+		_ = c.Process.Release()
+	}
+}
+
+// runHookExtract runs one extraction pass; gates that say "not yet" are
+// silent, real failures go to the hooks log.
+func runHookExtract(cmd *cobra.Command, _ []string) error {
+	ctx, cancel := context.WithTimeout(cmd.Context(), 2*extract.Timeout)
+	defer cancel()
+	root, _ := cmd.Flags().GetString("root")
+	agent, _ := cmd.Flags().GetString("agent")
+	session, _ := cmd.Flags().GetString("session")
+	final, _ := cmd.Flags().GetBool("final")
+	if root == "" || session == "" || !hooks.ValidSessionID(session) {
+		return nil
+	}
+	a, err := newAuth()
+	if err != nil || a == nil {
+		return nil //nolint:nilerr // signed out: the desktop's extractor also needs a sign-in
+	}
+	s, err := a.Session()
+	if err != nil {
+		return nil //nolint:nilerr // signed out
+	}
+	n, err := extract.Run(ctx, extract.Options{Root: root, Agent: agent, Session: session, Final: final,
+		Gateway: hosts.Gateway(),
+		Auth: func(ctx context.Context) (string, string, error) {
+			tok, err := a.Tokens().Token(ctx)
+			return tok, s.ActiveOrgID(), err
+		}})
+	switch {
+	case errors.Is(err, extract.ErrSkipped):
+	case err != nil:
+		hooks.LogError(root, agent, "extract", err)
+	case n > 0:
+		hooks.ClearLastError(root)
+	}
+	return nil
 }
 
 // syncAfterHook sends what a direct hook write just recorded to the cloud,

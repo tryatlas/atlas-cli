@@ -59,7 +59,7 @@ func TestCodexAddIdempotentRemove(t *testing.T) {
 		t.Fatalf("mode %v", fi.Mode())
 	}
 	cmd, args := parsedServer(t, path)
-	if cmd != "atlas" || strings.Join(args, " ") != "mcp-bridge --project "+root+" --agent codex" {
+	if cmd != "atlas" || strings.Join(args, " ") != "mcp-bridge --project "+root+" --agent codex-acp" {
 		t.Fatalf("%s %v", cmd, args)
 	}
 	b, _ := os.ReadFile(path)

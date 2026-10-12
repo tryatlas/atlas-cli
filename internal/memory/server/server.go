@@ -146,7 +146,22 @@ func (s *Server) SessionEnded(ctx context.Context, g Grant) {
 		return
 	}
 	if st, err := s.store(ctx, g.Cwd); err == nil {
-		_ = st.SessionEnd(ctx, g.SessionID, g.Agent, s.now())
+		now := s.now()
+		_ = st.SessionEnd(ctx, g.SessionID, g.Agent, now)
+		// The handoff note the next session's briefing shows, as the
+		// desktop's lifecycle writes it.
+		_ = st.WriteHandoff(ctx, g.SessionID, g.Agent, project.ScopeRoot(ctx, g.Cwd), now)
+	}
+}
+
+// Capture records the marked lines of an agent's reply as candidate
+// memories when sharing is on (the desktop's memory_delta).
+func (s *Server) Capture(ctx context.Context, g Grant, reply string) {
+	if g.SessionID == "" || strings.TrimSpace(reply) == "" || !sharingOn(ctx, g.Cwd) {
+		return
+	}
+	if st, err := s.store(ctx, g.Cwd); err == nil {
+		_, _ = st.CaptureCandidates(ctx, reply, g.Agent, g.SessionID, s.now())
 	}
 }
 
