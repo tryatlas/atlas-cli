@@ -43,7 +43,26 @@ func TestLoginFallsBackToTheTerminalClipboard(t *testing.T) {
 	if c, ok := msg.(codeCopied); !ok || !c.osc52 {
 		t.Fatalf("msg = %#v, want an OSC 52 fallback", msg)
 	}
-	if _, cmd = m.Update(msg); cmd == nil {
+	m, cmd = m.Update(msg)
+	if cmd == nil {
 		t.Error("no SetClipboard command for the fallback")
+	}
+	view := ansiRE.ReplaceAllString(m.View().Content, "")
+	if strings.Contains(view, "copied to your clipboard") || !strings.Contains(view, "No clipboard here") {
+		t.Errorf("fallback should hedge, not claim a copy:\n%s", view)
+	}
+}
+
+func TestLoginOverSSHSaysSo(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "10.0.0.2 52000 10.0.0.9 22")
+	writeClipboard = func(string) error { t.Error("native clipboard used over SSH"); return nil }
+	t.Cleanup(func() { writeClipboard = clipboard.WriteAll })
+
+	var m tea.Model = loginModel{}
+	m, cmd := m.Update(loginPrompt{Code: "WDJB-MJHT"})
+	m, _ = m.Update(cmd())
+	view := ansiRE.ReplaceAllString(m.View().Content, "")
+	if !strings.Contains(view, "You're on SSH") || !strings.Contains(view, "select the code above") {
+		t.Errorf("no SSH note:\n%s", view)
 	}
 }

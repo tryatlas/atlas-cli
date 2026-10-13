@@ -25,14 +25,15 @@ type (
 		err error
 	}
 	// codeCopied reports a copy of the code; osc52 means the native
-	// clipboard was out of reach, so the terminal is asked to copy instead.
-	codeCopied struct{ osc52 bool }
+	// clipboard was out of reach, so the terminal is asked to copy instead,
+	// and ssh that it was out of reach because this is an SSH session.
+	codeCopied struct{ osc52, ssh bool }
 )
 
 type loginModel struct {
 	prompt *DevicePrompt
 	frame  int
-	copied bool
+	copied *codeCopied
 	done   bool
 	who    string
 	err    error
@@ -49,7 +50,7 @@ func copyCode(code string) tea.Cmd {
 		if !remote && writeClipboard(code) == nil {
 			return codeCopied{}
 		}
-		return codeCopied{osc52: true}
+		return codeCopied{osc52: true, ssh: remote}
 	}
 }
 
@@ -68,7 +69,7 @@ func (m loginModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prompt = &p
 		return m, copyCode(p.Code)
 	case codeCopied:
-		m.copied = true
+		m.copied = &msg
 		if msg.osc52 {
 			return m, tea.SetClipboard(m.prompt.Code)
 		}
@@ -107,9 +108,7 @@ func (m loginModel) View() tea.View {
 	}
 	// The code sits alone at the line start, unboxed, so a triple-click copies it clean.
 	b.WriteString(Upper("your code") + "\n" + Default.Logo.Bold(true).Render(m.prompt.Code) + "\n")
-	if m.copied {
-		b.WriteString(Default.Success.Render("✓") + " " + Default.Faint.Render("copied to your clipboard") + "\n")
-	}
+	b.WriteString(copiedNote(m.copied))
 	b.WriteString("\n")
 	b.WriteString(Upper("open") + "\n" + Default.Info.Render(m.prompt.URL) + "\n")
 	if m.prompt.Opened {
@@ -120,6 +119,22 @@ func (m loginModel) View() tea.View {
 		Default.Faint.Render(fmt.Sprintf("code expires in %s", max(left, 0))) + "\n\n")
 	b.WriteString(Keys("C", "copy code", "ESC", "cancel") + "\n")
 	return tea.NewView(b.String())
+}
+
+// copiedNote says where the code went. A terminal may ignore an OSC 52
+// copy without a word, so that case is a hedge with a way round it.
+func copiedNote(c *codeCopied) string {
+	switch {
+	case c == nil:
+		return ""
+	case !c.osc52:
+		return Default.Success.Render("✓") + " " + Default.Faint.Render("copied to your clipboard") + "\n"
+	case c.ssh:
+		return Default.Warning.Render("!") + " " + Default.Faint.Render("You're on SSH, so your terminal was asked to copy the code.") + "\n" +
+			"  " + Default.Faint.Render("If pasting comes up empty, select the code above.") + "\n"
+	}
+	return Default.Warning.Render("!") + " " + Default.Faint.Render("No clipboard here, so your terminal was asked to copy the code.") + "\n" +
+		"  " + Default.Faint.Render("If pasting comes up empty, select the code above.") + "\n"
 }
 
 // Header2 is a screen's first line as a string.
