@@ -41,7 +41,7 @@ func TestLoginScreen(t *testing.T) {
 	}
 	m, _ = m.Update(loginPrompt{URL: "https://auth.example/device", Code: "WDJB-MJHT", Expires: time.Now().Add(10 * time.Minute)})
 	s := ansiRE.ReplaceAllString(m.View().Content, "")
-	for _, want := range []string{"Atlas", "sign in", "YOUR CODE", "W D J B - M J H T", "https://auth.example/device", "Waiting for approval", "code expires in"} {
+	for _, want := range []string{"Atlas", "sign in", "YOUR CODE", "\nWDJB-MJHT\n", "https://auth.example/device", "Waiting for approval", "code expires in"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q:\n%s", want, s)
 		}

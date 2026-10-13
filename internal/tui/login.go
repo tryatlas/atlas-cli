@@ -8,7 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
 )
 
 // DevicePrompt is what the user needs to approve a device sign-in.
@@ -24,14 +24,33 @@ type (
 		who string
 		err error
 	}
+	// codeCopied reports a copy of the code; osc52 means the native
+	// clipboard was out of reach, so the terminal is asked to copy instead.
+	codeCopied struct{ osc52 bool }
 )
 
 type loginModel struct {
 	prompt *DevicePrompt
 	frame  int
+	copied bool
 	done   bool
 	who    string
 	err    error
+}
+
+// writeClipboard is replaced in tests.
+var writeClipboard = clipboard.WriteAll
+
+// copyCode puts code on the clipboard: the native one on this machine, or
+// over SSH (where that clipboard is the wrong machine's) the terminal's.
+func copyCode(code string) tea.Cmd {
+	return func() tea.Msg {
+		remote := os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_TTY") != ""
+		if !remote && writeClipboard(code) == nil {
+			return codeCopied{}
+		}
+		return codeCopied{osc52: true}
+	}
 }
 
 func (m loginModel) Init() tea.Cmd { return workTicker() }
@@ -47,6 +66,12 @@ func (m loginModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case loginPrompt:
 		p := DevicePrompt(msg)
 		m.prompt = &p
+		return m, copyCode(p.Code)
+	case codeCopied:
+		m.copied = true
+		if msg.osc52 {
+			return m, tea.SetClipboard(m.prompt.Code)
+		}
 	case loginDone:
 		m.done, m.who, m.err = true, msg.who, msg.err
 		return m, tea.Quit
@@ -55,12 +80,12 @@ func (m loginModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.done, m.err = true, ErrCancelled
 			return m, tea.Quit
 		}
+		if msg.String() == "c" && m.prompt != nil {
+			return m, copyCode(m.prompt.Code)
+		}
 	}
 	return m, nil
 }
-
-// spaced writes a code with room between its characters: "W D J B - M J H T".
-func spaced(code string) string { return strings.Join(strings.Split(code, ""), " ") }
 
 func (m loginModel) View() tea.View {
 	var b strings.Builder
@@ -80,9 +105,12 @@ func (m loginModel) View() tea.View {
 		b.WriteString(pulse(m.frame) + " " + Default.Faint.Render("Asking Atlas for a sign-in code…") + "\n")
 		return tea.NewView(b.String())
 	}
-	code := Default.Logo.Render(spaced(m.prompt.Code))
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(Default.Rule.GetForeground()).Padding(1, 4).Render(code)
-	b.WriteString(Upper("your code") + "\n" + box + "\n\n")
+	// The code sits alone at the line start, unboxed, so a triple-click copies it clean.
+	b.WriteString(Upper("your code") + "\n" + Default.Logo.Bold(true).Render(m.prompt.Code) + "\n")
+	if m.copied {
+		b.WriteString(Default.Success.Render("✓") + " " + Default.Faint.Render("copied to your clipboard") + "\n")
+	}
+	b.WriteString("\n")
 	b.WriteString(Upper("open") + "\n" + Default.Info.Render(m.prompt.URL) + "\n")
 	if m.prompt.Opened {
 		b.WriteString(Default.Faint.Render("opened in your browser") + "\n")
@@ -90,7 +118,7 @@ func (m loginModel) View() tea.View {
 	left := time.Until(m.prompt.Expires).Round(time.Second)
 	b.WriteString("\n" + pulse(m.frame) + " " + Default.Bold.Render("Waiting for approval") + "  " +
 		Default.Faint.Render(fmt.Sprintf("code expires in %s", max(left, 0))) + "\n\n")
-	b.WriteString(Keys("ESC", "cancel") + "\n")
+	b.WriteString(Keys("C", "copy code", "ESC", "cancel") + "\n")
 	return tea.NewView(b.String())
 }
 
